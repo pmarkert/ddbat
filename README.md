@@ -30,7 +30,7 @@ All inputs come from flags or environment variables. Status messages go to stder
 
 ### Export
 
-Export all or a filtered subset of a table to JSON. If the command is interrupted, DDBat finishes the current DynamoDB page, closes the output cleanly, and prints a `--start-key` cursor you can use to resume.
+Export all or a filtered subset of a table to JSON lines by default, or use `--format json` for a JSON array. If the command is interrupted, DDBat finishes the current DynamoDB page, closes the output cleanly, and prints a `--start-key` cursor you can use to resume.
 
     # Export to stdout
     ddbat export --table users
@@ -49,7 +49,7 @@ Export all or a filtered subset of a table to JSON. If the command is interrupte
 
 ### Import
 
-Import a JSON array into a DynamoDB table.
+Import JSON lines or a JSON array into a DynamoDB table. Input format is auto-detected by default, or you can override it with `--input-format jsonl` or `--input-format json`.
 
     # From file
     ddbat import --table users --input users.json
@@ -57,12 +57,19 @@ Import a JSON array into a DynamoDB table.
     # From stdin
     cat users.json | ddbat import --table users
 
-Input must be a JSON array of objects:
+Examples:
+
+JSON array:
 
     [
       { "userId": "123", "name": "Alice" },
       { "userId": "456", "name": "Bob" }
     ]
+
+JSON lines:
+
+    { "userId": "123", "name": "Alice" }
+    { "userId": "456", "name": "Bob" }
 
 ### Delete
 
@@ -107,7 +114,7 @@ If you press Ctrl-C during export or delete, DDBat completes the current page, p
 
 ### Transform
 
-Apply a JavaScript or TypeScript function to every item in a JSON array. Reads from stdin and writes to stdout by default.
+Apply a JavaScript or TypeScript function to every item in a JSON stream. Reads from stdin and writes to stdout by default. Input format is auto-detected by default, or you can override it with `--input-format jsonl` or `--input-format json`. Output defaults to JSON lines, or use `--format json` for a JSON array.
 
 #### How Transforms Work
 
@@ -255,7 +262,7 @@ Supported operators: `=`, `<`, `<=`, `>`, `>=`, `begins_with(...)`, `between(...
 
 ### `--index`
 
-Query a secondary index (GSI or LSI):
+Query or scan a secondary index (GSI or LSI):
 
     --index "StatusIndex"
 
