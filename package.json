@@ -1,0 +1,57 @@
+{
+  "name": "ddbat",
+  "version": "1.0.0",
+  "description": "CLI stream processor to import/export/transform/delete DynamoDB records",
+  "main": "./dist/cli.js",
+  "exports": {
+    ".": "./dist/cli.js",
+    "./transform": {
+      "types": "./dist/transform-types.d.ts",
+      "default": "./dist/transform-types.js"
+    }
+  },
+  "bin": {
+    "ddbat": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsc && node dist/cli.js",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "dynamodb",
+    "migration",
+    "cli",
+    "aws"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.15",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "prettier": "^3.8.1",
+    "typescript-eslint": "^8.58.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.817.0",
+    "@aws-sdk/lib-dynamodb": "^3.817.0",
+    "@gutenye/commander-completion-carapace": "^1.0.9",
+    "@streamparser/json": "^0.0.22",
+    "@types/commander": "^2.12.0",
+    "commander": "^14.0.2"
+  },
+  "overrides": {
+    "@gutenye/commander-completion-carapace": {
+      "commander": "$commander"
+    }
+  }
+}
