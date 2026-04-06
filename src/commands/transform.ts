@@ -1,21 +1,17 @@
 import { Command } from "commander";
-import { createReadStream } from "fs";
-import { Readable } from "stream";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
-import { getErrorMessage } from "../error.js";
-import { JsonFormat, openOutput, streamItems } from "../json-stream.js";
-import { createProgressRenderer } from "../progress.js";
 import type { DdbatItem, TransformFn, TransformResult } from "../transform-types.js";
+import {
+  createDynamicFunction,
+  loadUserFunction,
+  runItemProcessor,
+  type StreamCommandOptions,
+} from "./stream-command-support.js";
 
-interface Options {
-  input?: string;
-  inputFormat?: JsonFormat;
+interface Options extends StreamCommandOptions {
   transform?: string;
   script?: string;
-  output?: string;
-  format?: JsonFormat;
-  progress?: boolean;
 }
 
 export function setup(program: Command) {
@@ -86,87 +82,33 @@ export function setup(program: Command) {
 }
 
 async function transformCommand(options: Options = {}) {
-  const { input: inputFile, inputFormat, transform: transformFile, script, output } = options;
-  const outputFile = output ?? "-";
-  const outputFormat: JsonFormat = options.format === "json" ? "json" : "jsonl";
+  const { transform: transformFile, script } = options;
+  const transformModeCount = [transformFile, script].filter(Boolean).length;
 
-  if (!transformFile && !script) {
+  if (transformModeCount === 0) {
     throw new Error("Provide either --transform <file> or --script <js>");
   }
-  if (transformFile && script) {
+  if (transformModeCount > 1) {
     throw new Error("--transform and --script are mutually exclusive. Provide only one.");
   }
-
-  const inputStream: Readable = inputFile
-    ? createReadStream(inputFile)
-    : (process.stdin as Readable);
 
   const transformFn = script
     ? createInlineTransform(script)
     : await loadTransformModule(transformFile!);
 
-  let totalItems = 0;
-  const writer = openOutput(outputFormat, outputFile);
-  let index = 0;
-  const progress = createProgressRenderer(options.progress ?? !process.stdout.isTTY);
-
-  for await (const item of streamItems(inputStream, inputFormat)) {
-    const results = await applyTransformToItem(item, index++, transformFn);
-    for (const result of results) {
-      await writer.writeItem(result);
-      totalItems++;
-    }
-    progress.update(totalItems);
-  }
-
-  await writer.close();
-
-  const summary =
-    outputFile && outputFile !== "-"
-      ? `Transformed ${totalItems} items -> ${outputFile}`
-      : `Transformed ${totalItems} items`;
-  progress.end(summary);
+  await runItemProcessor(
+    options,
+    (item, index) => applyTransformToItem(item, index, transformFn),
+    "Transformed"
+  );
 }
 
 function createInlineTransform(script: string): TransformFn {
-  try {
-    return new Function("item", "index", script) as TransformFn;
-  } catch (err) {
-    throw new Error(`Failed to parse --script: ${String(err)}`, { cause: err });
-  }
+  return createDynamicFunction<TransformFn>(script, "--script");
 }
 
 async function loadTransformModule(transformFile: string): Promise<TransformFn> {
-  // Load the transform via native Node module loading.
-  // .ts files rely on Node's built-in TypeScript support when available.
-  try {
-    // Resolve transform file to an absolute path and import via file:// URL
-    const { resolve } = await import("path");
-    const { pathToFileURL } = await import("url");
-    const resolvedPath = resolve(transformFile);
-    const fileUrl = pathToFileURL(resolvedPath).href;
-    const mod = await import(fileUrl);
-
-    // Prefer default export then named export 'transform' or 'default'
-    const transformFn = (mod.default || mod.transform || mod.apply) as TransformFn;
-
-    if (!transformFn || typeof transformFn !== "function") {
-      throw new Error("Transform module must export a function as default or named 'transform'");
-    }
-
-    return transformFn;
-  } catch (err) {
-    if (transformFile.endsWith(".ts")) {
-      throw new Error(
-        `Failed to load TypeScript transform module: ${getErrorMessage(
-          err
-        )}. Use ESM syntax, explicit relative import extensions, and only TypeScript features supported by native Node type stripping. If needed, precompile the transform to .js.`,
-        { cause: err }
-      );
-    }
-
-    throw new Error(`Failed to load transform module: ${getErrorMessage(err)}`, { cause: err });
-  }
+  return loadUserFunction<TransformFn>(transformFile, "transform", ["transform", "apply"]);
 }
 
 /** Apply the transform function to one input item, returning an array of output items. */

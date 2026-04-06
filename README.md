@@ -114,7 +114,7 @@ If you press Ctrl-C during export or delete, DDBat completes the current page, p
 
 ### Transform
 
-Apply a JavaScript or TypeScript function to every item in a JSON stream. Reads from stdin and writes to stdout by default. Input format is auto-detected by default, or you can override it with `--input-format jsonl` or `--input-format json`. Output defaults to JSON lines, or use `--format json` for a JSON array.
+Apply a JavaScript or TypeScript function to every item in a JSON stream. Reads from stdin and writes to stdout by default. Input format is auto-detected by default, or you can override it with `--input-format jsonl` or `--input-format json`. Output defaults to JSON lines, or use `--format json` for a JSON array. Provide either `--transform` or `--script`.
 
 #### How Transforms Work
 
@@ -218,6 +218,43 @@ Limitations:
 - Avoid `enum`, parameter properties, decorators, and `tsconfig` path aliases
 - Compile to `.js` first if you need unsupported TS features
 
+### Filter
+
+Apply a JavaScript or TypeScript predicate to every item in a JSON stream. The command shares the same input and output options as `transform`, but the function must return a boolean. Items are only emitted when the predicate returns `true`. Inline `--script` accepts either a bare expression or a full function body.
+
+#### Quick Usage
+
+```bash
+# Inline predicate expression: 'item' and 'index' are in scope
+ddbat filter --script 'item.type === "carecircle-invitation"'
+
+# Keep only active records from a file
+ddbat filter --input data.json --script 'item.active'
+
+# Load a predicate from a module file
+ddbat filter -x ./filters/keep-active.js
+```
+
+#### Filter File Template (JavaScript)
+
+```js
+export default function (item, index) {
+  return item.active && index < 1000;
+}
+```
+
+Filter functions may also be async. TypeScript filter files have the same native Node.js limitations as transform files.
+
+```bash
+ddbat filter --script 'item.active && item.region === "us-east-1"'
+```
+
+NOTE: If you use a multi-statement inline script, include an explicit `return`:
+
+```bash
+ddbat filter --script 'const keep = item.active && item.region === "us-east-1"; return keep'
+```
+
 ### Pipelines
 
 Commands compose naturally with Unix pipes:
@@ -227,6 +264,11 @@ Commands compose naturally with Unix pipes:
 
     # Copy with filtering
     ddbat export --table users --filter "status='active'" | ddbat import --table active-users
+
+    # Copy with stream filtering
+    ddbat export --table users \
+      | ddbat filter --script 'item.status === "active"' \
+      | ddbat import --table active-users
 
     # Copy with transform
     ddbat export --table users \
