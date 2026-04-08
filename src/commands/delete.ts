@@ -1,10 +1,12 @@
 import { BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { Command } from "commander";
+import { createReadStream } from "fs";
 import * as readline from "readline";
+import { Readable } from "stream";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
 import { addFilterOptions, FilterCommandOptions, parseFilterOptions } from "../filter-options.js";
-import { openOutput, OutputSession } from "../json-stream.js";
+import { JsonFormat, openOutput, OutputSession, streamItems } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { createInterruptTracker, parseStartKey, printResumeHint } from "../resume.js";
 import { DdbatItem } from "../transform-types.js";
@@ -26,6 +28,13 @@ interface Options extends FilterCommandOptions {
   pageSize?: number;
   progress?: boolean;
   startKey?: DdbatItem;
+  input?: string;
+  inputFormat?: JsonFormat;
+}
+
+interface StreamPage {
+  items: DdbatItem[];
+  hasMore: boolean;
 }
 
 type DeleteFormat = Options["format"];
@@ -293,17 +302,43 @@ async function loadNextPage(
   };
 }
 
+async function readStreamPage(
+  iterator: AsyncIterator<DdbatItem>,
+  pageSize: number
+): Promise<StreamPage> {
+  const items: DdbatItem[] = [];
+  while (items.length < pageSize) {
+    const result = await iterator.next();
+    if (result.done) break;
+    items.push(result.value);
+  }
+  return { items, hasMore: items.length === pageSize };
+}
+
 export function setup(program: Command) {
   const command = program
     .command("delete")
-    .description("Delete matching items from a DynamoDB table (requires query filters)")
+    .description(
+      "Delete matching items from a DynamoDB table. Use query filters (--pk, --sk, etc.) or supply keys via --input."
+    )
     .option("-t, --table <tableName>", "Table name [required]")
+    .option(
+      "-i, --input [file]",
+      "Read records from a file (or stdin if omitted) and delete by their keys"
+    )
+    .option(
+      "--input-format <format>",
+      "Input format when using --input: jsonl (JSON lines) or json (JSON array) — auto-detected when omitted"
+    )
     .option("--dry-run", "Preview items to be deleted without actually deleting")
     .option("--force", "Skip confirmation prompt and delete immediately")
-    .option("--no-count", "Skip the initial count query before paging through matches")
+    .option(
+      "--no-count",
+      "Skip the initial count query before paging through matches (query mode only)"
+    )
     .option(
       "--start-key <json>",
-      "Resume from a DynamoDB LastEvaluatedKey JSON object",
+      "Resume from a DynamoDB LastEvaluatedKey JSON object (query mode only)",
       parseStartKey
     )
     .option(
@@ -324,6 +359,248 @@ export function setup(program: Command) {
   command.action(wrapCommandHandler(deleteCommand));
 }
 
+async function deleteStreamCommand(
+  options: Options,
+  tableName: string,
+  pageSize: number,
+  keySchema: TableKeySchema,
+  interruptTracker: ReturnType<typeof createInterruptTracker>
+) {
+  const inputSource = options.input || "-";
+  const inputStream: Readable =
+    inputSource === "-" ? (process.stdin as Readable) : createReadStream(inputSource);
+  const inputLabel = inputSource !== "-" ? inputSource : "stdin";
+
+  const iterator = streamItems(inputStream, options.inputFormat)[Symbol.asyncIterator]();
+
+  console.error("=".repeat(60));
+  console.error(`Stream mode: reading keys from ${inputLabel}`);
+  console.error(`Page size: ${pageSize}`);
+  console.error("=".repeat(60));
+
+  console.error("\nLoading first page from input stream...");
+  let currentStreamPage = await readStreamPage(iterator, pageSize);
+
+  if (currentStreamPage.items.length === 0) {
+    if (options.format === "count") {
+      process.stdout.write("0");
+    } else {
+      console.error("No items in input stream.");
+    }
+    return;
+  }
+
+  if (hasVerboseOutput(options.format)) {
+    const mode = options.dryRun ? "[DRY RUN] " : "";
+    console.error(
+      `${mode}${options.dryRun ? "Would delete" : "Will delete"} items read from ${inputLabel}.`
+    );
+    if (usesPagedPrompt(options.format) && (options.force || options.dryRun)) {
+      renderDeletePreviewPage(
+        currentStreamPage.items,
+        keySchema,
+        1,
+        pageSize,
+        0,
+        undefined,
+        0,
+        currentStreamPage.hasMore
+      );
+    }
+  }
+
+  if (options.dryRun) {
+    if (hasVerboseOutput(options.format)) {
+      console.error("\n[DRY RUN] Delete was not executed. Remove --dry-run to actually delete.");
+    }
+
+    if (options.format === "count") {
+      let count = currentStreamPage.items.length;
+      while (currentStreamPage.hasMore) {
+        currentStreamPage = await readStreamPage(iterator, pageSize);
+        count += currentStreamPage.items.length;
+      }
+      process.stdout.write(String(count));
+    } else if (options.format === "full" || options.format === "keys") {
+      const output = createDeleteOutput(options.format);
+      if (output) {
+        try {
+          let page = currentStreamPage;
+          while (page.items.length > 0) {
+            await writeDeletedItems(output, options.format, page.items, keySchema);
+            if (!page.hasMore) break;
+            page = await readStreamPage(iterator, pageSize);
+          }
+        } finally {
+          await output.close();
+        }
+      }
+    }
+
+    return;
+  }
+
+  let totalDeleted = 0;
+  const progress = createProgressRenderer(options.progress && options.format !== "silent");
+  const output = createDeleteOutput(options.format);
+  let stoppedEarly = false;
+  let deletionAnnounced = false;
+  let lastDeletedKey: DdbatItem | undefined;
+
+  const announceDeleting = () => {
+    if (!deletionAnnounced && hasVerboseOutput(options.format)) {
+      console.error("\nDeleting items...");
+      deletionAnnounced = true;
+    }
+  };
+
+  const deletePage = async (items: DdbatItem[]) => {
+    const deleted = await deleteItemsPage(
+      tableName,
+      items,
+      keySchema,
+      progress,
+      totalDeleted,
+      undefined,
+      output,
+      options.format
+    );
+    totalDeleted += deleted;
+    lastDeletedKey = extractKeys(items[items.length - 1], keySchema);
+  };
+
+  try {
+    if (options.force) {
+      while (currentStreamPage.items.length > 0) {
+        announceDeleting();
+        await deletePage(currentStreamPage.items);
+
+        if (interruptTracker.stopRequested()) {
+          stoppedEarly = true;
+          break;
+        }
+
+        if (!currentStreamPage.hasMore) break;
+        currentStreamPage = await readStreamPage(iterator, pageSize);
+      }
+    } else if (usesPagedPrompt(options.format)) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+
+      try {
+        let pageNumber = 1;
+        let startIndex = 0;
+
+        while (currentStreamPage.items.length > 0) {
+          if (interruptTracker.stopRequested()) {
+            stoppedEarly = true;
+            break;
+          }
+
+          renderDeletePreviewPage(
+            currentStreamPage.items,
+            keySchema,
+            pageNumber,
+            pageSize,
+            startIndex,
+            undefined,
+            totalDeleted,
+            currentStreamPage.hasMore
+          );
+
+          const action = await promptDeleteAction(rl, currentStreamPage.hasMore);
+
+          if (action === "quit") {
+            stoppedEarly = true;
+            break;
+          }
+
+          if (action === "next-page") {
+            startIndex += currentStreamPage.items.length;
+            pageNumber++;
+            currentStreamPage = await readStreamPage(iterator, pageSize);
+            continue;
+          }
+
+          announceDeleting();
+          await deletePage(currentStreamPage.items);
+
+          if (interruptTracker.stopRequested()) {
+            stoppedEarly = true;
+            break;
+          }
+
+          if (action === "delete-all") {
+            while (currentStreamPage.hasMore) {
+              currentStreamPage = await readStreamPage(iterator, pageSize);
+              if (currentStreamPage.items.length === 0) break;
+              await deletePage(currentStreamPage.items);
+
+              if (interruptTracker.stopRequested()) {
+                stoppedEarly = true;
+                break;
+              }
+            }
+            break;
+          }
+
+          if (!currentStreamPage.hasMore) break;
+          startIndex += currentStreamPage.items.length;
+          pageNumber++;
+          currentStreamPage = await readStreamPage(iterator, pageSize);
+        }
+
+        if (stoppedEarly && totalDeleted === 0) {
+          console.error("Deletion cancelled. No items were deleted.");
+        }
+      } finally {
+        rl.close();
+      }
+    } else {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+
+      try {
+        const confirmed = await promptDeleteAllConfirmation(rl, undefined);
+        if (!confirmed) {
+          console.error("Deletion cancelled. No items were deleted.");
+          return;
+        }
+      } finally {
+        rl.close();
+      }
+
+      while (currentStreamPage.items.length > 0) {
+        announceDeleting();
+        await deletePage(currentStreamPage.items);
+
+        if (interruptTracker.stopRequested()) {
+          stoppedEarly = true;
+          break;
+        }
+
+        if (!currentStreamPage.hasMore) break;
+        currentStreamPage = await readStreamPage(iterator, pageSize);
+      }
+    }
+
+    if (options.format === "count") {
+      process.stdout.write(String(totalDeleted));
+    }
+
+    if (stoppedEarly && lastDeletedKey) {
+      console.error(
+        `\nStopped after deleting ${totalDeleted} items. Last deleted key: ${JSON.stringify(lastDeletedKey)}`
+      );
+    } else if (hasVerboseOutput(options.format) && totalDeleted > 0 && !stoppedEarly) {
+      progress.end(`✓ Successfully deleted ${totalDeleted} items from ${tableName}`);
+    }
+  } finally {
+    interruptTracker.dispose();
+    if (output) {
+      await output.close();
+    }
+  }
+}
+
 async function deleteCommand(options: Options = {}) {
   const tableName = options.table || process.env.DDBAT_TABLE;
   const pageSize = resolvePageSize(options.pageSize);
@@ -333,8 +610,28 @@ async function deleteCommand(options: Options = {}) {
     throw new Error("Table name is required. Provide --table or set DDBAT_TABLE");
   }
 
+  const streamMode = options.input !== undefined;
+  const hasQueryFilters = options.pk || options.sk || options.index || options.filter;
+
+  if (streamMode && hasQueryFilters) {
+    throw new Error(
+      "--input cannot be combined with query filter options (--pk, --sk, --index, --filter). Use one or the other."
+    );
+  }
+  if (streamMode && options.startKey) {
+    throw new Error("--input cannot be combined with --start-key.");
+  }
+  if (streamMode && options.count === false) {
+    throw new Error("--no-count is only valid in query mode, not with --input.");
+  }
+
   // Get table key schema
   const keySchema = await getTableKeySchema(tableName);
+
+  if (streamMode) {
+    await deleteStreamCommand(options, tableName, pageSize, keySchema, interruptTracker);
+    return;
+  }
 
   // Parse query options using shared function
   const queryOptions = parseFilterOptions(options, keySchema);
@@ -520,7 +817,12 @@ async function deleteCommand(options: Options = {}) {
             startIndex += currentPage.items.length;
             pageNumber += 1;
             currentPageStartKey = currentPage.lastEvaluatedKey;
-            currentPage = await queryTablePage(tableName, queryOptions, pageSize, currentPageStartKey);
+            currentPage = await queryTablePage(
+              tableName,
+              queryOptions,
+              pageSize,
+              currentPageStartKey
+            );
             continue;
           }
 
