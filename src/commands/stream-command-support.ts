@@ -8,7 +8,6 @@ import type { DdbatItem } from "../transform-types.js";
 
 export interface StreamCommandOptions {
   input?: string;
-  inputFormat?: JsonFormat;
   output?: string;
   format?: JsonFormat;
   progress?: boolean;
@@ -25,6 +24,9 @@ export async function runItemProcessor(
 ): Promise<void> {
   const outputFile = options.output ?? "-";
   const outputFormat: JsonFormat = options.format === "json" ? "json" : "jsonl";
+  if (!options.input && process.stdin.isTTY) {
+    throw new Error("No input provided. Pipe data to stdin or use --input <file>.");
+  }
   const inputStream: Readable = options.input
     ? createReadStream(options.input)
     : (process.stdin as Readable);
@@ -34,7 +36,7 @@ export async function runItemProcessor(
   const writer = openOutput(outputFormat, outputFile);
   const progress = createProgressRenderer(options.progress ?? !process.stdout.isTTY);
 
-  for await (const item of streamItems(inputStream, options.inputFormat)) {
+  for await (const item of streamItems(inputStream)) {
     const results = await processor(item, index++);
     for (const result of results) {
       await writer.writeItem(result);

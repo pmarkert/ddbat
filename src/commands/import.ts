@@ -4,7 +4,7 @@ import { createReadStream } from "fs";
 import { Readable } from "stream";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
-import { JsonFormat, streamItems } from "../json-stream.js";
+import { streamItems } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { DdbatItem } from "../transform-types.js";
 import { dynamoClient } from "../util.js";
@@ -12,7 +12,6 @@ import { dynamoClient } from "../util.js";
 interface Options {
   table?: string;
   input?: string;
-  inputFormat?: JsonFormat;
   progress?: boolean;
 }
 
@@ -22,10 +21,7 @@ export function setup(program: Command) {
     .description("Import a JSON file to a DynamoDB table")
     .option("-t, --table <tableName>", "Destination table name [required]")
     .option("-i, --input [file]", "Input file (defaults to stdin)")
-    .option(
-      "--input-format <format>",
-      "Input format: jsonl (JSON lines) or json (JSON array) — auto-detected when omitted"
-    )
+
     .option("--no-progress", "No animated progress indicator")
     .action(wrapCommandHandler(importCommand));
 }
@@ -37,7 +33,10 @@ async function importCommand(options: Options = {}) {
     throw new Error("Destination table name is required. Provide --table or set DDBAT_TABLE");
   }
 
-  const inputSource = options.input ?? "-";
+  const inputSource = options.input ?? (process.stdin.isTTY ? undefined : "-");
+  if (!inputSource) {
+    throw new Error("No input provided. Pipe data to stdin or use --input <file>.");
+  }
   let inputStream: Readable;
   if (inputSource === "-") {
     inputStream = process.stdin as Readable;
@@ -69,7 +68,7 @@ async function importCommand(options: Options = {}) {
     batch = [];
   };
 
-  for await (const item of streamItems(inputStream, options.inputFormat)) {
+  for await (const item of streamItems(inputStream)) {
     batch.push(item);
     if (batch.length >= BATCH_SIZE) {
       await flushBatch();

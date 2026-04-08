@@ -65,10 +65,7 @@ export function setup(program: Command) {
       ].join("\n")
     )
     .option("-i, --input [file]", "Input file (omit to read from stdin)")
-    .option(
-      "--input-format <format>",
-      "Input format: jsonl (JSON lines) or json (JSON array) — auto-detected when omitted"
-    )
+
     .option("-x, --transform <file>", "Path to transform module file")
     .option("-s, --script <js>", "Inline JS function body with 'item' and 'index' in scope")
     .option("-o, --output [file]", "Output file path (defaults to stdout)")

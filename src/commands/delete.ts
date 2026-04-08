@@ -6,7 +6,7 @@ import { Readable } from "stream";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
 import { addFilterOptions, FilterCommandOptions, parseFilterOptions } from "../filter-options.js";
-import { JsonFormat, openOutput, OutputSession, streamItems } from "../json-stream.js";
+import { openOutput, OutputSession, streamItems } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { createInterruptTracker, parseStartKey, printResumeHint } from "../resume.js";
 import { DdbatItem } from "../transform-types.js";
@@ -19,6 +19,29 @@ import {
   queryTablePage,
 } from "../util.js";
 
+interface PromptSession {
+  rl: readline.Interface;
+  close: () => void;
+}
+
+function createPromptInterface(): PromptSession {
+  if (process.stdin.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    return { rl, close: () => rl.close() };
+  }
+
+  const ttyPath = process.platform === "win32" ? "CONIN$" : "/dev/tty";
+  const ttyInput = createReadStream(ttyPath);
+  const rl = readline.createInterface({ input: ttyInput, output: process.stderr });
+  return {
+    rl,
+    close: () => {
+      rl.close();
+      ttyInput.destroy();
+    },
+  };
+}
+
 interface Options extends FilterCommandOptions {
   table?: string;
   dryRun?: boolean;
@@ -29,7 +52,6 @@ interface Options extends FilterCommandOptions {
   progress?: boolean;
   startKey?: DdbatItem;
   input?: string;
-  inputFormat?: JsonFormat;
 }
 
 interface StreamPage {
@@ -326,10 +348,6 @@ export function setup(program: Command) {
       "-i, --input [file]",
       "Read records from a file (or stdin if omitted) and delete by their keys"
     )
-    .option(
-      "--input-format <format>",
-      "Input format when using --input: jsonl (JSON lines) or json (JSON array) — auto-detected when omitted"
-    )
     .option("--dry-run", "Preview items to be deleted without actually deleting")
     .option("--force", "Skip confirmation prompt and delete immediately")
     .option(
@@ -371,7 +389,7 @@ async function deleteStreamCommand(
     inputSource === "-" ? (process.stdin as Readable) : createReadStream(inputSource);
   const inputLabel = inputSource !== "-" ? inputSource : "stdin";
 
-  const iterator = streamItems(inputStream, options.inputFormat)[Symbol.asyncIterator]();
+  const iterator = streamItems(inputStream)[Symbol.asyncIterator]();
 
   console.error("=".repeat(60));
   console.error(`Stream mode: reading keys from ${inputLabel}`);
@@ -484,7 +502,7 @@ async function deleteStreamCommand(
         currentStreamPage = await readStreamPage(iterator, pageSize);
       }
     } else if (usesPagedPrompt(options.format)) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+      const prompt = createPromptInterface();
 
       try {
         let pageNumber = 1;
@@ -507,7 +525,7 @@ async function deleteStreamCommand(
             currentStreamPage.hasMore
           );
 
-          const action = await promptDeleteAction(rl, currentStreamPage.hasMore);
+          const action = await promptDeleteAction(prompt.rl, currentStreamPage.hasMore);
 
           if (action === "quit") {
             stoppedEarly = true;
@@ -553,19 +571,19 @@ async function deleteStreamCommand(
           console.error("Deletion cancelled. No items were deleted.");
         }
       } finally {
-        rl.close();
+        prompt.close();
       }
     } else {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+      const prompt = createPromptInterface();
 
       try {
-        const confirmed = await promptDeleteAllConfirmation(rl, undefined);
+        const confirmed = await promptDeleteAllConfirmation(prompt.rl, undefined);
         if (!confirmed) {
           console.error("Deletion cancelled. No items were deleted.");
           return;
         }
       } finally {
-        rl.close();
+        prompt.close();
       }
 
       while (currentStreamPage.items.length > 0) {
@@ -610,12 +628,13 @@ async function deleteCommand(options: Options = {}) {
     throw new Error("Table name is required. Provide --table or set DDBAT_TABLE");
   }
 
-  const streamMode = options.input !== undefined;
+  const streamMode = options.input !== undefined || !process.stdin.isTTY;
   const hasQueryFilters = options.pk || options.sk || options.index || options.filter;
 
-  if (streamMode && hasQueryFilters) {
+  if (!process.stdin.isTTY && options.input === undefined && hasQueryFilters) {
     throw new Error(
-      "--input cannot be combined with query filter options (--pk, --sk, --index, --filter). Use one or the other."
+      "Piped input detected with query filter options (--pk, --sk, --index, --filter). " +
+        "Use --input explicitly to read from stdin, or remove piped input to use query mode."
     );
   }
   if (streamMode && options.startKey) {
@@ -775,10 +794,7 @@ async function deleteCommand(options: Options = {}) {
         currentPage = nextPage.page;
       }
     } else if (usesPagedPrompt(options.format)) {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stderr,
-      });
+      const prompt = createPromptInterface();
 
       try {
         let pageNumber = 1;
@@ -802,7 +818,7 @@ async function deleteCommand(options: Options = {}) {
             Boolean(currentPage.lastEvaluatedKey)
           );
 
-          const action = await promptDeleteAction(rl, Boolean(currentPage.lastEvaluatedKey));
+          const action = await promptDeleteAction(prompt.rl, Boolean(currentPage.lastEvaluatedKey));
           if (action === "quit") {
             stoppedEarly = true;
             resumeStartKey = currentPageStartKey;
@@ -911,22 +927,19 @@ async function deleteCommand(options: Options = {}) {
           }
         }
       } finally {
-        rl.close();
+        prompt.close();
       }
     } else {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stderr,
-      });
+      const prompt = createPromptInterface();
 
       try {
-        const confirmed = await promptDeleteAllConfirmation(rl, totalCount);
+        const confirmed = await promptDeleteAllConfirmation(prompt.rl, totalCount);
         if (!confirmed) {
           console.error("Deletion cancelled. No items were deleted.");
           return;
         }
       } finally {
-        rl.close();
+        prompt.close();
       }
 
       while (currentPage.items.length > 0) {
