@@ -1,6 +1,6 @@
 {
   "name": "ddbat",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "CLI stream processor to import/export/transform/delete DynamoDB records",
   "main": "./dist/cli.js",
   "exports": {
