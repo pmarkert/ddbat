@@ -1,8 +1,9 @@
 import { BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { Command } from "commander";
-import { createReadStream } from "fs";
+import { createReadStream, openSync } from "fs";
 import * as readline from "readline";
 import { Readable } from "stream";
+import { ReadStream as TtyReadStream } from "tty";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
 import { addFilterOptions, FilterCommandOptions, parseFilterOptions } from "../filter-options.js";
@@ -31,7 +32,8 @@ function createPromptInterface(): PromptSession {
   }
 
   const ttyPath = process.platform === "win32" ? "CONIN$" : "/dev/tty";
-  const ttyInput = createReadStream(ttyPath);
+  const fd = openSync(ttyPath, "r");
+  const ttyInput = new TtyReadStream(fd);
   const rl = readline.createInterface({ input: ttyInput, output: process.stderr });
   return {
     rl,
@@ -142,18 +144,18 @@ function renderDeletePreviewPage(
 
   const remainingCount = typeof totalCount === "number" ? totalCount - startIndex : undefined;
   console.error("Actions:");
-  if (typeof remainingCount === "number") {
-    console.error(`  all  Delete all remaining items from this page onward (${remainingCount})`);
-  } else {
-    console.error("  all  Delete all remaining items from this page onward");
-  }
   console.error(
-    `  d    Delete this page (${items.length})${hasMore ? ", then show the next page" : ""}`
+    ` [d]   Delete this page (${items.length})${hasMore ? ", then show the next page" : ""}`
   );
   if (hasMore) {
-    console.error("  n    Show the next page without deleting this one");
+    console.error(" [n]   Show the next page without deleting this one");
   }
-  console.error("  q    Stop now without deleting this page or any later pages");
+  if (typeof remainingCount === "number") {
+    console.error(` [all]   Delete all remaining items from this page onward (${remainingCount})`);
+  } else {
+    console.error(" [all]   Delete all remaining items from this page onward");
+  }
+  console.error(" [q]   Stop now without deleting this page or any later pages");
 }
 
 function promptQuestion(rl: readline.Interface, prompt: string) {

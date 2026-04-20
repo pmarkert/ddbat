@@ -77,15 +77,19 @@ async function peekFormat(readable: Readable): Promise<{ format: JsonFormat; str
   }
 
   async function* replay(): AsyncGenerator<Buffer> {
-    for (const chunk of prefix) {
-      yield chunk;
-    }
+    try {
+      for (const chunk of prefix) {
+        yield chunk;
+      }
 
-    while (true) {
-      const { value, done } = await iterator.next();
-      if (done) return;
+      while (true) {
+        const { value, done } = await iterator.next();
+        if (done) return;
 
-      yield Buffer.isBuffer(value) ? value : Buffer.from(String(value));
+        yield Buffer.isBuffer(value) ? value : Buffer.from(String(value));
+      }
+    } finally {
+      await iterator.return?.();
     }
   }
 
