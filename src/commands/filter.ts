@@ -14,7 +14,7 @@ interface Options extends StreamCommandOptions {
   script?: string;
 }
 
-type FilterFn = (item: DdbatItem, index: number) => boolean | Promise<boolean>;
+type FilterFn = (item: DdbatItem, index: number) => unknown | Promise<unknown>;
 
 export function setup(program: Command) {
   program
@@ -27,7 +27,7 @@ export function setup(program: Command) {
       [
         "\nProvide either --transform (a module file) or --script (an inline expression or JS body).",
         "",
-        "Filter functions receive 'item' and 'index' and must return true to keep the item or false to drop it.",
+        "Filter functions receive 'item' and 'index' and must return a truthy value to keep the item or a falsy value to drop it.",
         "",
         "--transform module must export a default function or named 'filter':",
         '  export default (item, index) => item.type === "carecircle-invitation";',
@@ -108,7 +108,7 @@ async function applyFilterToItem(
   index: number,
   filterFn: FilterFn
 ): Promise<DdbatItem[]> {
-  let res: boolean | Promise<boolean>;
+  let res: unknown;
   try {
     res = filterFn(item, index);
   } catch (err) {
@@ -116,17 +116,5 @@ async function applyFilterToItem(
   }
 
   const keep = await res;
-  if (typeof keep !== "boolean") {
-    throw new Error(
-      `Filter failed at item #${index + 1}: expected a boolean result, received ${describeValue(keep)}. Inline expressions can omit 'return', but multi-statement scripts must return true or false explicitly.`
-    );
-  }
-
   return keep ? [item] : [];
-}
-
-function describeValue(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "an array";
-  return typeof value;
 }
