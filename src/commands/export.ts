@@ -14,6 +14,7 @@ interface Options extends FilterCommandOptions {
   format?: JsonFormat;
   progress?: boolean;
   startKey?: DdbatItem;
+  limit?: number;
 }
 
 const EXPORT_PAGE_SIZE = 1000;
@@ -33,7 +34,12 @@ export function setup(program: Command) {
       "--format <format>",
       "Output format: jsonl (JSON lines, default) or json (JSON array)",
       "jsonl"
-    );
+    )
+    .option("--limit <count>", "Maximum number of items to export", (value: string) => {
+      const n = parseInt(value, 10);
+      if (isNaN(n) || n <= 0) throw new Error("--limit must be a positive integer");
+      return n;
+    });
 
   // Add filter options
   addFilterOptions(command);
@@ -103,6 +109,9 @@ async function exportCommand(options: Options = {}) {
         if (totalItems % 1000 === 0) {
           progress.update(totalItems);
         }
+        if (options.limit && totalItems >= options.limit) {
+          break;
+        }
       }
 
       resumeStartKey = page.lastEvaluatedKey;
@@ -115,6 +124,10 @@ async function exportCommand(options: Options = {}) {
         progress.end(summary);
         printResumeHint("export", resumeStartKey);
         return;
+      }
+
+      if (options.limit && totalItems >= options.limit) {
+        break;
       }
 
       if (!page.lastEvaluatedKey) {
