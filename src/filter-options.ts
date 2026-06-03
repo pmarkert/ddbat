@@ -112,6 +112,7 @@ export function parseFilterOptions(
     } else {
       // Check for comparison operators. Allow optional space or colon after operator
       // Examples: '>=100', '>= 100', '>=:100' (colon kept for backwards-compat)
+      // Note: Sort keys support only =, <, <=, >, >=, BETWEEN, begins_with
       const operatorMatch = input.match(/^(<=|>=|<|>|=)[:\s]?(.*)$/);
       if (operatorMatch) {
         queryOptions.sortKey = {
@@ -284,7 +285,8 @@ function normalizeFilterExpression(filter: string): {
     }
 
     // comparison operators
-    const compMatch = trimmed.match(/^(\w+)\s*(=|!=|<=|>=|<|>)\s*(.+)$/);
+    // Note: Filter expressions support <> for not-equal, but not !=
+    const compMatch = trimmed.match(/^(\w+)\s*(<>|<=|>=|<|>|=)\s*(.+)$/);
     if (compMatch) {
       const field = compMatch[1];
       const op = compMatch[2];
