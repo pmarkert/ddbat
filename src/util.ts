@@ -30,6 +30,7 @@ export interface QueryOptions {
   indexName?: string;
   filterExpression?: string;
   filterAttributes?: DdbatItem;
+  filterAttributeNames?: Record<string, string>;
 }
 
 export interface KeySchema {
@@ -49,7 +50,7 @@ interface QueryRequestOptions {
 }
 
 function buildQueryRequest(options: QueryOptions) {
-  const { partitionKey, sortKey, indexName, filterExpression, filterAttributes } = options;
+  const { partitionKey, sortKey, indexName, filterExpression, filterAttributes, filterAttributeNames } = options;
 
   let KeyConditionExpression: string | undefined;
   const ExpressionAttributeNames: Record<string, string> = {};
@@ -103,7 +104,19 @@ function buildQueryRequest(options: QueryOptions) {
     for (const [key, value] of Object.entries(filterAttributes)) {
       const valuePlaceholder = `:${key}`;
       ExpressionAttributeValues[valuePlaceholder] = value;
+    }
+  }
 
+  // Explicit attribute name mappings (e.g. from between/contains where value keys differ from field name)
+  if (filterAttributeNames) {
+    for (const [placeholder, name] of Object.entries(filterAttributeNames)) {
+      if (!ExpressionAttributeNames[placeholder]) {
+        ExpressionAttributeNames[placeholder] = name;
+      }
+    }
+  } else if (filterAttributes) {
+    // Fallback: derive name placeholders from value keys (works for simple equality/comparison cases)
+    for (const key of Object.keys(filterAttributes)) {
       const namePlaceholder = `#${key}`;
       if (!ExpressionAttributeNames[namePlaceholder]) {
         ExpressionAttributeNames[namePlaceholder] = key;

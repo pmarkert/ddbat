@@ -140,9 +140,10 @@ export function parseFilterOptions(
   if (options.filter) {
     // Normalize simple filter expressions into Dynamo-safe placeholders
     // e.g. type='goal'  ->  #type = :type  with filterAttributes { type: 'goal' }
-    const { expression, attributes } = normalizeFilterExpression(options.filter);
+    const { expression, attributes, attributeNames } = normalizeFilterExpression(options.filter);
     queryOptions.filterExpression = expression;
     queryOptions.filterAttributes = attributes;
+    queryOptions.filterAttributeNames = attributeNames;
   }
 
   return queryOptions;
@@ -157,8 +158,19 @@ export function parseFilterOptions(
 function normalizeFilterExpression(filter: string): {
   expression: string;
   attributes: DdbatItem;
+  attributeNames: Record<string, string>;
 } {
   const attributes: DdbatItem = {};
+  const attributeNames: Record<string, string> = {};
+
+  // Pre-process SQL-style BETWEEN: attr BETWEEN val1 AND val2
+  // Must happen before splitting on AND/OR so the AND inside BETWEEN isn't treated as a logical operator.
+  // Values may be quoted strings or unquoted non-whitespace tokens.
+  const quotedOrToken = `(?:"[^"]*"|'[^']*'|\\S+)`;
+  filter = filter.replace(
+    new RegExp(`(\\w+)\\s+BETWEEN\\s+(${quotedOrToken})\\s+AND\\s+(${quotedOrToken})`, "gi"),
+    (_, field, val1, val2) => `between(${field}, ${val1}, ${val2})`
+  );
 
   // Split on AND/OR while keeping the separators
   const parts = filter.split(/(\s+(?:AND|OR)\s+)/i);
@@ -173,6 +185,7 @@ function normalizeFilterExpression(filter: string): {
     const existsMatch = trimmed.match(/^attribute_exists\((\w+)\)$/i);
     if (existsMatch) {
       const field = existsMatch[1];
+      attributeNames[`#${field}`] = field;
       return `attribute_exists(#${field})`;
     }
 
@@ -180,6 +193,7 @@ function normalizeFilterExpression(filter: string): {
     const notExistsMatch = trimmed.match(/^attribute_not_exists\((\w+)\)$/i);
     if (notExistsMatch) {
       const field = notExistsMatch[1];
+      attributeNames[`#${field}`] = field;
       return `attribute_not_exists(#${field})`;
     }
 
@@ -197,6 +211,7 @@ function normalizeFilterExpression(filter: string): {
       ) {
         val = val.substring(1, val.length - 1);
       }
+      attributeNames[`#${field}`] = field;
       attributes[field] = parseValue(val);
       return `begins_with(#${field}, :${field})`;
     }
@@ -213,6 +228,7 @@ function normalizeFilterExpression(filter: string): {
       ) {
         val = val.substring(1, val.length - 1);
       }
+      attributeNames[`#${field}`] = field;
       attributes[field] = parseValue(val);
       return `contains(#${field}, :${field})`;
     }
@@ -236,6 +252,7 @@ function normalizeFilterExpression(filter: string): {
       ) {
         val2 = val2.substring(1, val2.length - 1);
       }
+      attributeNames[`#${field}`] = field;
       attributes[`${field}_between1`] = parseValue(val1);
       attributes[`${field}_between2`] = parseValue(val2);
       return `#${field} BETWEEN :${field}_between1 AND :${field}_between2`;
@@ -254,6 +271,7 @@ function normalizeFilterExpression(filter: string): {
       ) {
         val = val.substring(1, val.length - 1);
       }
+      attributeNames[`#${field}`] = field;
       attributes[`${field}_size`] = parseValue(val);
       return `size(#${field}) ${op} :${field}_size`;
     }
@@ -281,6 +299,7 @@ function normalizeFilterExpression(filter: string): {
         attributes[placeholder] = val;
         return `:${placeholder}`;
       });
+      attributeNames[`#${field}`] = field;
       return `#${field} IN (${placeholders.join(", ")})`;
     }
 
@@ -300,6 +319,7 @@ function normalizeFilterExpression(filter: string): {
         val = val.substring(1, val.length - 1);
       }
 
+      attributeNames[`#${field}`] = field;
       attributes[field] = parseValue(val);
       return `#${field} ${op} :${field}`;
     }
@@ -308,7 +328,7 @@ function normalizeFilterExpression(filter: string): {
     return part;
   });
 
-  return { expression: parsedParts.join(" "), attributes };
+  return { expression: parsedParts.join(" "), attributes, attributeNames };
 }
 
 function parseValue(val: string) {
