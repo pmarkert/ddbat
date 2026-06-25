@@ -49,13 +49,16 @@ Export all or a filtered subset of a table to JSON lines by default, or use `--f
 
 ### Import
 
-Import JSON lines or a JSON array into a DynamoDB table. Input format is auto-detected by default, or you can override it with `--input-format jsonl` or `--input-format json`.
+Import JSON lines or a JSON array into a DynamoDB table. Use `--dry-run` to parse and count input items without writing to DynamoDB.
 
     # From file
     ddbat import --table users --input users.json
 
     # From stdin
     cat users.json | ddbat import --table users
+
+    # Parse and count without writing
+    ddbat import --table users --input users.json --dry-run
 
 Examples:
 
@@ -73,7 +76,7 @@ JSON lines:
 
 ### Delete
 
-Count matching items, show a forward-only preview page, and prompt for a per-page action before deleting. Use `--dry-run` to preview only, `--no-count` to skip the initial count pass, `--page-size` to control how many matching items appear on each page, `--start-key` to resume from a previously printed cursor, or `--force` to skip the prompt.
+Count matching items, show a forward-only preview page, and prompt for a per-page action before deleting. Use `--dry-run` to preview only, `--no-count` to skip the initial count pass, `--page-size` to control how many matching items appear on each page, `--start-key` to resume from a previously printed cursor, or `--force` to skip prompts and begin deleting immediately.
 
     # Preview without deleting
     ddbat delete --table users --pk "inactive" --dry-run
@@ -321,7 +324,12 @@ Supported: `=`, `!=`, `<`, `<=`, `>`, `>=`, `begins_with`, `contains`, `between`
 
 ## Environment Variables
 
-    export DDBAT_TABLE=my-table   # Default table for export, import, delete
+export DDBAT_TABLE=my-table # Used when --table is omitted (help shows: default: $DDBAT_TABLE)
+export DDBAT_DRYRUN=1 # Forces --dry-run on commands that support it
+
+`DDBAT_DRYRUN` enables dry-run only when set to a truthy value.
+
+Values treated as disabled: empty string (`""`), `0`, and `false` (any case).
 
 ## Debugging
 

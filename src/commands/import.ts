@@ -20,9 +20,12 @@ export function setup(program: Command) {
   program
     .command("import")
     .description("Import a JSON file to a DynamoDB table")
-    .option("-t, --table <tableName>", "Destination table name [required]")
+    .option("-t, --table <tableName>", "Destination table name [required] (default: $DDBAT_TABLE)")
     .option("-i, --input [file]", "Input file (defaults to stdin)")
-    .option("--dry-run", "Parse and count input items without writing to DynamoDB")
+    .option(
+      "--dry-run",
+      "Parse and count input items without writing to DynamoDB (or set DDBAT_DRYRUN=1)"
+    )
 
     .option("--no-progress", "No animated progress indicator")
     .action(wrapCommandHandler(importCommand));

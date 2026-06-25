@@ -345,12 +345,15 @@ export function setup(program: Command) {
     .description(
       "Delete matching items from a DynamoDB table. Use query filters (--pk, --sk, etc.) or supply keys via --input."
     )
-    .option("-t, --table <tableName>", "Table name [required]")
+    .option("-t, --table <tableName>", "Table name [required] (default: $DDBAT_TABLE)")
     .option(
       "-i, --input [file]",
       "Read records from a file (or stdin if omitted) and delete by their keys"
     )
-    .option("--dry-run", "Preview items to be deleted without actually deleting")
+    .option(
+      "--dry-run",
+      "Preview items to be deleted without actually deleting (or set DDBAT_DRYRUN=1)"
+    )
     .option("--force", "Skip confirmation prompt and delete immediately")
     .option(
       "--no-count",

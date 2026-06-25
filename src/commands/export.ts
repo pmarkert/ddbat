@@ -23,7 +23,7 @@ export function setup(program: Command) {
   const command = program
     .command("export")
     .description("Export a DynamoDB table to a JSON file")
-    .option("-t, --table <tableName>", "Source table name [required]")
+    .option("-t, --table <tableName>", "Source table name [required] (default: $DDBAT_TABLE)")
     .option("-o, --output [file]", "Output file path (defaults to stdout)")
     .option(
       "--start-key <json>",
