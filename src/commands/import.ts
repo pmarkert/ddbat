@@ -12,6 +12,7 @@ import { dynamoClient } from "../util.js";
 interface Options {
   table?: string;
   input?: string;
+  dryRun?: boolean;
   progress?: boolean;
 }
 
@@ -21,6 +22,7 @@ export function setup(program: Command) {
     .description("Import a JSON file to a DynamoDB table")
     .option("-t, --table <tableName>", "Destination table name [required]")
     .option("-i, --input [file]", "Input file (defaults to stdin)")
+    .option("--dry-run", "Parse and count input items without writing to DynamoDB")
 
     .option("--no-progress", "No animated progress indicator")
     .action(wrapCommandHandler(importCommand));
@@ -55,11 +57,13 @@ async function importCommand(options: Options = {}) {
   const flushBatch = async () => {
     if (batch.length === 0) return;
 
-    await dynamoClient.send(
-      new BatchWriteCommand({
-        RequestItems: { [toTable]: batch.map((Item) => ({ PutRequest: { Item } })) },
-      })
-    );
+    if (!options.dryRun) {
+      await dynamoClient.send(
+        new BatchWriteCommand({
+          RequestItems: { [toTable]: batch.map((Item) => ({ PutRequest: { Item } })) },
+        })
+      );
+    }
 
     totalWritten += batch.length;
     if (totalWritten % 100 === 0) {
@@ -77,5 +81,9 @@ async function importCommand(options: Options = {}) {
 
   await flushBatch();
 
-  progress.end(`Imported ${totalWritten} items from ${inputLabel} into ${toTable}`);
+  if (options.dryRun) {
+    progress.end(`[DRY RUN] Would import ${totalWritten} items from ${inputLabel} into ${toTable}`);
+  } else {
+    progress.end(`Imported ${totalWritten} items from ${inputLabel} into ${toTable}`);
+  }
 }

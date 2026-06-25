@@ -415,7 +415,7 @@ async function deleteStreamCommand(
     console.error(
       `${mode}${options.dryRun ? "Would delete" : "Will delete"} items read from ${inputLabel}.`
     );
-    if (usesPagedPrompt(options.format) && (options.force || options.dryRun)) {
+    if (usesPagedPrompt(options.format) && options.dryRun) {
       renderDeletePreviewPage(
         currentStreamPage.items,
         keySchema,
@@ -697,8 +697,6 @@ async function deleteCommand(options: Options = {}) {
       }
       return;
     }
-  } else {
-    console.error("\nSkipping initial count (--no-count).");
   }
 
   console.error("\nLoading first page of matching items...");
@@ -719,7 +717,7 @@ async function deleteCommand(options: Options = {}) {
     console.error(
       `${mode}${options.dryRun ? "Would delete" : "Will delete"} ${countLabel} items matching this query.`
     );
-    if (usesPagedPrompt(options.format) && (options.force || options.dryRun)) {
+    if (usesPagedPrompt(options.format) && options.dryRun) {
       renderDeletePreviewPage(
         currentPage.items,
         keySchema,
