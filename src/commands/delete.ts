@@ -67,6 +67,7 @@ type DeleteAction = "delete-all" | "delete-page" | "next-page" | "quit";
 
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_TTY_PADDING = 10;
+const MAX_DELETE_PAGE_SIZE = 100;
 const DELETE_BATCH_SIZE = 25;
 
 function parsePositiveInteger(value: string) {
@@ -78,7 +79,15 @@ function parsePositiveInteger(value: string) {
   return parsed;
 }
 
-function resolvePageSize(pageSize?: number) {
+function resolvePageSize(pageSize?: number, force?: boolean) {
+  if (force) {
+    if (pageSize) {
+      return Math.min(pageSize, MAX_DELETE_PAGE_SIZE);
+    }
+
+    return MAX_DELETE_PAGE_SIZE;
+  }
+
   if (pageSize) {
     return pageSize;
   }
@@ -626,7 +635,7 @@ async function deleteStreamCommand(
 
 async function deleteCommand(options: Options = {}) {
   const tableName = options.table || process.env.DDBAT_TABLE;
-  const pageSize = resolvePageSize(options.pageSize);
+  const pageSize = resolvePageSize(options.pageSize, options.force);
   const interruptTracker = createInterruptTracker();
 
   if (!tableName) {
