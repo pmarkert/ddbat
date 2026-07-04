@@ -50,7 +50,14 @@ interface QueryRequestOptions {
 }
 
 function buildQueryRequest(options: QueryOptions) {
-  const { partitionKey, sortKey, indexName, filterExpression, filterAttributes, filterAttributeNames } = options;
+  const {
+    partitionKey,
+    sortKey,
+    indexName,
+    filterExpression,
+    filterAttributes,
+    filterAttributeNames,
+  } = options;
 
   let KeyConditionExpression: string | undefined;
   const ExpressionAttributeNames: Record<string, string> = {};
@@ -229,21 +236,15 @@ export async function queryTablePage(
     throw new Error("Page size must be at least 1");
   }
 
-  const items: DdbatItem[] = [];
-  let lastEvaluatedKey = exclusiveStartKey;
+  const response = await executeQueryRequest(TableName, options, {
+    exclusiveStartKey,
+    limit: pageSize,
+  });
 
-  do {
-    const response = await executeQueryRequest(TableName, options, {
-      exclusiveStartKey: lastEvaluatedKey,
-      limit: pageSize - items.length,
-    });
-
-    items.push(...(response.Items || []));
-    lastEvaluatedKey = response.LastEvaluatedKey;
-  } while (items.length < pageSize && lastEvaluatedKey);
+  const lastEvaluatedKey = response.LastEvaluatedKey;
 
   return {
-    items,
+    items: response.Items || [],
     lastEvaluatedKey,
   };
 }

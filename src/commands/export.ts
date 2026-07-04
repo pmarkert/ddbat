@@ -97,11 +97,10 @@ async function exportCommand(options: Options = {}) {
   };
 
   try {
-    while (true) {
+    let nextKey: DdbatItem | undefined;
+    do {
+      const requestStartKey = nextStartKey;
       const page = await queryTablePage(fromTable, queryOptions, EXPORT_PAGE_SIZE, nextStartKey);
-      if (page.items.length === 0) {
-        break;
-      }
 
       for (const item of page.items) {
         await writer.writeItem(item);
@@ -114,7 +113,8 @@ async function exportCommand(options: Options = {}) {
         }
       }
 
-      resumeStartKey = page.lastEvaluatedKey;
+      nextKey = page.lastEvaluatedKey;
+      resumeStartKey = nextKey ?? requestStartKey;
       if (interruptTracker.stopRequested()) {
         await closeWriter();
         const summary =
@@ -130,19 +130,13 @@ async function exportCommand(options: Options = {}) {
         break;
       }
 
-      if (!page.lastEvaluatedKey) {
-        break;
-      }
-
-      nextStartKey = page.lastEvaluatedKey;
-    }
-
-    await closeWriter();
+      nextStartKey = nextKey;
+    } while (nextKey);
   } catch (error) {
-    await closeWriter();
     printResumeHint("export", resumeStartKey);
     throw error;
   } finally {
+    await closeWriter();
     interruptTracker.dispose();
   }
 

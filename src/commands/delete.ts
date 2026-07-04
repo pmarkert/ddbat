@@ -305,17 +305,35 @@ async function streamDryRunOutput(
   }
 
   try {
-    let page: QueryPage = firstPage;
-    while (page.items.length > 0) {
-      await writeDeletedItems(output, format, page.items, keySchema);
-      if (!page.lastEvaluatedKey) {
-        break;
+    let page: QueryPage | undefined = firstPage;
+    while (page) {
+      if (page.items.length > 0) {
+        await writeDeletedItems(output, format, page.items, keySchema);
       }
 
-      page = await queryTablePage(tableName, queryOptions, pageSize, page.lastEvaluatedKey);
+      const nextPage = await loadNextPage(tableName, queryOptions, pageSize, page);
+      page = nextPage?.page;
     }
   } finally {
     await output.close();
+  }
+}
+
+async function loadPageSkippingEmpty(
+  tableName: string,
+  queryOptions: ReturnType<typeof parseFilterOptions>,
+  pageSize: number,
+  startKey?: DdbatItem
+): Promise<{ startKey?: DdbatItem; page: QueryPage }> {
+  let pageStartKey = startKey;
+
+  while (true) {
+    const page = await queryTablePage(tableName, queryOptions, pageSize, pageStartKey);
+    if (page.items.length > 0 || !page.lastEvaluatedKey) {
+      return { startKey: pageStartKey, page };
+    }
+
+    pageStartKey = page.lastEvaluatedKey;
   }
 }
 
@@ -329,10 +347,7 @@ async function loadNextPage(
     return undefined;
   }
 
-  return {
-    startKey: page.lastEvaluatedKey,
-    page: await queryTablePage(tableName, queryOptions, pageSize, page.lastEvaluatedKey),
-  };
+  return loadPageSkippingEmpty(tableName, queryOptions, pageSize, page.lastEvaluatedKey);
 }
 
 async function readStreamPage(
@@ -712,8 +727,12 @@ async function deleteCommand(options: Options = {}) {
   }
 
   console.error("\nLoading first page of matching items...");
-  let currentPageStartKey = options.startKey;
-  let currentPage = await queryTablePage(tableName, queryOptions, pageSize, currentPageStartKey);
+  let { startKey: currentPageStartKey, page: currentPage } = await loadPageSkippingEmpty(
+    tableName,
+    queryOptions,
+    pageSize,
+    options.startKey
+  );
 
   if (currentPage.items.length === 0) {
     if (options.format === "count") {
@@ -838,19 +857,15 @@ async function deleteCommand(options: Options = {}) {
           }
 
           if (action === "next-page") {
-            if (!currentPage.lastEvaluatedKey) {
+            const nextPage = await loadNextPage(tableName, queryOptions, pageSize, currentPage);
+            if (!nextPage) {
               break;
             }
 
             startIndex += currentPage.items.length;
             pageNumber += 1;
-            currentPageStartKey = currentPage.lastEvaluatedKey;
-            currentPage = await queryTablePage(
-              tableName,
-              queryOptions,
-              pageSize,
-              currentPageStartKey
-            );
+            currentPageStartKey = nextPage.startKey;
+            currentPage = nextPage.page;
             continue;
           }
 

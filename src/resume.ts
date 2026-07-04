@@ -33,7 +33,7 @@ export function printResumeHint(commandName: string, startKey?: DdbatItem) {
   }
 
   console.error(`Resume cursor: ${formattedKey}`);
-  console.error(`Resume with: ddbat ${commandName} --start-key ${JSON.stringify(formattedKey)}`);
+  console.error(`Resume with: --start-key ${JSON.stringify(formattedKey)}`);
 }
 
 export interface InterruptTracker {
