@@ -28,6 +28,7 @@ export interface QueryOptions {
   partitionKey?: { name: string; value: unknown };
   sortKey?: { name: string; operator: string; value: unknown; value2?: unknown };
   indexName?: string;
+  scanIndexForward?: boolean;
   filterExpression?: string;
   filterAttributes?: DdbatItem;
   filterAttributeNames?: Record<string, string>;
@@ -54,6 +55,7 @@ function buildQueryRequest(options: QueryOptions) {
     partitionKey,
     sortKey,
     indexName,
+    scanIndexForward,
     filterExpression,
     filterAttributes,
     filterAttributeNames,
@@ -133,6 +135,7 @@ function buildQueryRequest(options: QueryOptions) {
 
   return {
     indexName,
+    scanIndexForward,
     filterExpression,
     keyConditionExpression: KeyConditionExpression,
     expressionAttributeNames: ExpressionAttributeNames,
@@ -147,6 +150,7 @@ async function executeQueryRequest(
 ): Promise<QueryCommandOutput | ScanCommandOutput> {
   const {
     indexName,
+    scanIndexForward,
     filterExpression,
     keyConditionExpression,
     expressionAttributeNames,
@@ -174,6 +178,7 @@ async function executeQueryRequest(
       new QueryCommand({
         ...sharedInput,
         ...(indexName && { IndexName: indexName }),
+        ...(scanIndexForward !== undefined && { ScanIndexForward: scanIndexForward }),
         KeyConditionExpression: keyConditionExpression,
       })
     );

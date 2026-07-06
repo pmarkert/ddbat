@@ -41,6 +41,9 @@ Export all or a filtered subset of a table to JSON lines by default, or use `--f
     # Filter by partition key and sort key
     ddbat export --table orders --pk "customer-123" --sk ">= 2024-01-01"
 
+    # Query in reverse sort-key order (descending)
+    ddbat export --table orders --pk "customer-123" --reverse
+
     # Filter by expression
     ddbat export --table users --filter "status='active' AND age>18"
 

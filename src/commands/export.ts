@@ -15,6 +15,7 @@ interface Options extends FilterCommandOptions {
   progress?: boolean;
   startKey?: DdbatItem;
   limit?: number;
+  reverse?: boolean;
 }
 
 const EXPORT_PAGE_SIZE = 1000;
@@ -35,6 +36,7 @@ export function setup(program: Command) {
       "Output format: jsonl (JSON lines, default) or json (JSON array)",
       "jsonl"
     )
+    .option("--reverse", "Read query results in descending sort-key order")
     .option("--limit <count>", "Maximum number of items to export", (value: string) => {
       const n = parseInt(value, 10);
       if (isNaN(n) || n <= 0) throw new Error("--limit must be a positive integer");
@@ -63,12 +65,22 @@ async function exportCommand(options: Options = {}) {
 
   // Parse query options using shared function
   const queryOptions = parseFilterOptions(options, keySchema);
+  if (options.reverse) {
+    if (queryOptions.partitionKey) {
+      queryOptions.scanIndexForward = false;
+    } else {
+      console.error("Ignoring --reverse because full table/index scans do not support reverse traversal");
+    }
+  }
 
   // Log query type
   if (queryOptions.partitionKey) {
     console.error(
       `Querying with partition key: ${queryOptions.partitionKey.name}=${queryOptions.partitionKey.value}`
     );
+    if (options.reverse) {
+      console.error("Sort-key order: descending (--reverse)");
+    }
     if (queryOptions.indexName) {
       console.error(`Using index: ${queryOptions.indexName}`);
     }
