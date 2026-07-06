@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { NewCommand } from "@gutenye/commander-completion-carapace";
+import tab from "@bomb.sh/tab/commander";
+import { Command } from "commander";
 import { readdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -15,15 +16,44 @@ const packageVersion = JSON.parse(
 
 const APP_BANNER = "/\\/\\ ^..^ /\\/\\";
 
+function addOptionValueCompletions(completion: ReturnType<typeof tab>): void {
+  const formatValues = ["json", "jsonl", "full", "keys", "count", "silent"];
+
+  for (const commandName of ["export", "delete", "transform", "filter"]) {
+    const formatOption = completion.commands.get(commandName)?.options.get("format");
+    if (formatOption) {
+      formatOption.handler = (complete) => {
+        for (const value of formatValues) {
+          complete(value, "");
+        }
+      };
+    }
+  }
+
+  for (const commandName of ["export", "delete"]) {
+    const skOption = completion.commands.get(commandName)?.options.get("sk");
+    if (skOption) {
+      skOption.handler = (complete) => {
+        complete(">=", "greater than or equal");
+        complete("<=", "less than or equal");
+        complete(">", "greater than");
+        complete("<", "less than");
+        complete("=", "equal");
+        complete("begins_with(", "starts-with expression");
+        complete("between(", "range expression");
+      };
+    }
+  }
+}
+
 async function main() {
-  const program = new NewCommand();
+  const program = new Command();
 
   program
     .name("ddbat")
     .description(APP_BANNER + "\n\nCLI tool to import/export/delete/transform DynamoDB records")
     .version(packageVersion)
-    .showHelpAfterError("(add --help for additional information)")
-    .enableCompletion();
+    .showHelpAfterError("(add --help for additional information)");
 
   // Auto-discover and register all commands from the commands folder
   const commandsDir = join(__dirname, "commands");
@@ -36,15 +66,8 @@ async function main() {
     }
   }
 
-  // Add completion command
-  program
-    .command("completion")
-    .description("Install shell completion for ddbat")
-    .action(async () => {
-      await program.installCompletion();
-      console.log("\nShell completion has been installed!");
-      console.log("Restart your shell or run: source ~/.zshrc (or ~/.bashrc)");
-    });
+  const completion = tab(program, { completionCommandName: "completion" });
+  addOptionValueCompletions(completion);
 
   program.parse();
 }

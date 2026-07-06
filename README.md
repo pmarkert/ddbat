@@ -342,9 +342,34 @@ Prints full error stack traces to stderr.
 
 ## Shell Completion
 
-DDBat supports shell completion via [Carapace](https://carapace-sh.github.io/carapace-bin/):
+DDBat supports shell completion via [@bomb.sh/tab](https://www.npmjs.com/package/@bomb.sh/tab).
 
-    brew install carapace   # macOS
-    ddbat completion      # install the completion spec
+Generate a completion script for your shell and source it:
 
-Restart your shell, then use Tab to complete commands and flags.
+```bash
+# zsh (current shell only)
+source <(ddbat completion zsh)
+
+# bash (current shell only)
+source <(ddbat completion bash)
+
+# fish (current shell only)
+ddbat completion fish | source
+```
+
+To enable completion permanently:
+
+```bash
+# zsh
+ddbat completion zsh > ~/.ddbat-completion.zsh
+echo 'source ~/.ddbat-completion.zsh' >> ~/.zshrc
+
+# bash
+ddbat completion bash > ~/.ddbat-completion.bash
+echo 'source ~/.ddbat-completion.bash' >> ~/.bashrc
+
+# fish
+ddbat completion fish > ~/.config/fish/completions/ddbat.fish
+```
+
+To disable completion, remove the sourced line from your shell config and delete the generated completion file.

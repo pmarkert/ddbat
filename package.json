@@ -45,14 +45,8 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.817.0",
     "@aws-sdk/lib-dynamodb": "^3.817.0",
-    "@gutenye/commander-completion-carapace": "^1.0.9",
+    "@bomb.sh/tab": "^0.0.17",
     "@streamparser/json": "^0.0.22",
-    "@types/commander": "^2.12.0",
-    "commander": "^14.0.2"
-  },
-  "overrides": {
-    "@gutenye/commander-completion-carapace": {
-      "commander": "$commander"
-    }
+    "commander": "^13.1.0"
   }
 }
