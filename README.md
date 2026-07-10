@@ -30,6 +30,39 @@ npx ddbat --help
     npm run build
     npm link  # makes 'ddbat' available globally
 
+## Release
+
+Run a one-command local release that verifies the repo, bumps version, publishes to npm, and pushes git commit/tags.
+
+Patch release:
+
+    npm run release:patch
+
+Minor release:
+
+    npm run release:minor
+
+Major release:
+
+    npm run release:major
+
+Custom bump type:
+
+    npm run release -- patch
+
+If publishing a scoped package that must be public:
+
+    npm run release -- patch --access-public
+
+The script performs these steps:
+
+- Fails if your working tree is not clean
+- Fails if npm CLI is not logged in
+- Runs lint, build, and npm pack --dry-run
+- Runs npm version (patch/minor/major)
+- Runs npm publish
+- Pushes git commit and tags
+
 ## Usage
 
 All inputs come from flags or environment variables. Status messages go to stderr; JSON data goes to stdout, making it safe to pipe between commands.
