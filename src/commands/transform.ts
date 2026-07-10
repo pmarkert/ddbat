@@ -1,13 +1,13 @@
 import { Command } from "commander";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
-import type { DdbatItem, TransformFn, TransformResult } from "../transform-types.js";
 import {
   createDynamicFunction,
   loadUserFunction,
   runItemProcessor,
   type StreamCommandOptions,
-} from "./stream-command-support.js";
+} from "../stream-command-support.js";
+import type { DdbatItem, TransformFn, TransformResult } from "../transform-types.js";
 
 interface Options extends StreamCommandOptions {
   transform?: string;

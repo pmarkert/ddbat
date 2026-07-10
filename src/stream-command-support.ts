@@ -1,10 +1,10 @@
 import { createReadStream } from "fs";
 import { Readable } from "stream";
 
-import { getErrorMessage } from "../error.js";
-import { JsonFormat, openOutput, streamItems } from "../json-stream.js";
-import { createProgressRenderer } from "../progress.js";
-import type { DdbatItem } from "../transform-types.js";
+import { getErrorMessage } from "./error.js";
+import { JsonFormat, openOutput, streamItems } from "./json-stream.js";
+import { createProgressRenderer } from "./progress.js";
+import type { DdbatItem } from "./transform-types.js";
 
 export interface StreamCommandOptions {
   input?: string;
