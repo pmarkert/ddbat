@@ -13,6 +13,15 @@ Pronounced: either "diddy-bat" or "dee-dee-bat".
 - Node.js 18+
 - AWS credentials configured (via environment variables, AWS CLI, or IAM role)
 
+### Install from npm
+
+npm install -g ddbat
+ddbat --help
+
+Or run without installing globally:
+
+npx ddbat --help
+
 ### Install from source
 
     git clone <repository-url>
