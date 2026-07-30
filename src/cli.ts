@@ -3,7 +3,7 @@
 import tab from "@bomb.sh/tab/commander";
 import { Command } from "commander";
 import { readdirSync, readFileSync } from "fs";
-import { dirname, join } from "path";
+import { dirname, isAbsolute, join, posix, resolve } from "path";
 import { fileURLToPath } from "url";
 
 import { handleErrorAndExit } from "./error.js";
@@ -15,6 +15,75 @@ const packageVersion = JSON.parse(
 ).version;
 
 const APP_BANNER = "/\\/\\ ^..^ /\\/\\";
+
+interface FileCompletionOptions {
+  fileExtensions?: string[];
+}
+
+function currentCompletionToken(): string {
+  const argv = process.argv;
+  const doubleDashIndex = argv.indexOf("--");
+  if (doubleDashIndex === -1 || doubleDashIndex === argv.length - 1) {
+    return "";
+  }
+
+  return argv[argv.length - 1] ?? "";
+}
+
+function listPathCompletions(
+  complete: (value: string, description: string) => void,
+  options: FileCompletionOptions = {}
+): void {
+  const token = currentCompletionToken();
+  const normalizedToken = token.replace(/\\/g, "/");
+  const hasSlash = normalizedToken.includes("/");
+  const tokenEndsWithSlash = normalizedToken.endsWith("/");
+
+  const parentPath = tokenEndsWithSlash
+    ? normalizedToken.slice(0, -1)
+    : hasSlash
+      ? normalizedToken.slice(0, normalizedToken.lastIndexOf("/"))
+      : "";
+
+  const searchPrefix = tokenEndsWithSlash
+    ? ""
+    : hasSlash
+      ? normalizedToken.slice(normalizedToken.lastIndexOf("/") + 1)
+      : normalizedToken;
+
+  const fsParentPath = parentPath || ".";
+  const searchDir = isAbsolute(fsParentPath)
+    ? resolve(fsParentPath)
+    : resolve(process.cwd(), fsParentPath);
+
+  let entries;
+  try {
+    entries = readdirSync(searchDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const entryName = entry.name;
+
+    if (!entryName.startsWith(searchPrefix)) {
+      continue;
+    }
+
+    const isDir = entry.isDirectory();
+    if (!isDir && options.fileExtensions?.length) {
+      const hasAllowedExtension = options.fileExtensions.some((ext) =>
+        entryName.toLowerCase().endsWith(ext.toLowerCase())
+      );
+      if (!hasAllowedExtension) {
+        continue;
+      }
+    }
+
+    const baseValue = parentPath ? posix.join(parentPath, entryName) : entryName;
+    complete(isDir ? `${baseValue}/` : baseValue, isDir ? "directory" : "file");
+  }
+}
 
 function addOptionValueCompletions(completion: ReturnType<typeof tab>): void {
   const formatValues = ["json", "jsonl", "full", "keys", "count", "silent"];
@@ -43,6 +112,29 @@ function addOptionValueCompletions(completion: ReturnType<typeof tab>): void {
         complete("between(", "range expression");
       };
     }
+  }
+
+  const exportOutput = completion.commands.get("export")?.options.get("output");
+  if (exportOutput) {
+    exportOutput.handler = (complete) => {
+      listPathCompletions(complete);
+    };
+  }
+
+  const importInput = completion.commands.get("import")?.options.get("input");
+  if (importInput) {
+    importInput.handler = (complete) => {
+      listPathCompletions(complete);
+    };
+  }
+
+  const transformFile = completion.commands.get("transform")?.options.get("transform");
+  if (transformFile) {
+    transformFile.handler = (complete) => {
+      listPathCompletions(complete, {
+        fileExtensions: [".js", ".cjs", ".mjs", ".ts", ".cts", ".mts"],
+      });
+    };
   }
 }
 
