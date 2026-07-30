@@ -6,7 +6,7 @@ import { JsonFormat, openOutput } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { createInterruptTracker, parseStartKey, printResumeHint } from "../resume.js";
 import { DdbatItem } from "../transform-types.js";
-import { getTableKeySchema, queryTablePage } from "../util.js";
+import { getQueryKeySchema, queryTablePage } from "../util.js";
 
 interface Options extends FilterCommandOptions {
   table?: string;
@@ -60,8 +60,8 @@ async function exportCommand(options: Options = {}) {
     throw new Error("Source table name is required. Provide --table or set DDBAT_TABLE");
   }
 
-  // Get table key schema
-  const keySchema = await getTableKeySchema(fromTable);
+  // Resolve key schema for the selected query target (table or index)
+  const keySchema = await getQueryKeySchema(fromTable, options.index);
 
   // Parse query options using shared function
   const queryOptions = parseFilterOptions(options, keySchema);
@@ -69,7 +69,9 @@ async function exportCommand(options: Options = {}) {
     if (queryOptions.partitionKey) {
       queryOptions.scanIndexForward = false;
     } else {
-      console.error("Ignoring --reverse because full table/index scans do not support reverse traversal");
+      console.error(
+        "Ignoring --reverse because full table/index scans do not support reverse traversal"
+      );
     }
   }
 

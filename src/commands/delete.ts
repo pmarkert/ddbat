@@ -15,6 +15,7 @@ import {
   countTable,
   dynamoClient,
   extractKeys,
+  getQueryKeySchema,
   getTableKeySchema,
   QueryPage,
   queryTablePage,
@@ -67,8 +68,9 @@ type DeleteAction = "delete-all" | "delete-page" | "next-page" | "quit";
 
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_TTY_PADDING = 10;
-const MAX_DELETE_PAGE_SIZE = 100;
 const DELETE_BATCH_SIZE = 25;
+// Keep query page size aligned with DynamoDB write batch/transaction limits.
+const MAX_DELETE_PAGE_SIZE = DELETE_BATCH_SIZE;
 
 function parsePositiveInteger(value: string) {
   const parsed = Number.parseInt(value, 10);
@@ -89,14 +91,14 @@ function resolvePageSize(pageSize?: number, force?: boolean) {
   }
 
   if (pageSize) {
-    return pageSize;
+    return Math.min(pageSize, MAX_DELETE_PAGE_SIZE);
   }
 
   if (process.stderr.isTTY && typeof process.stderr.rows === "number") {
-    return Math.max(5, process.stderr.rows - PAGE_SIZE_TTY_PADDING);
+    return Math.min(MAX_DELETE_PAGE_SIZE, Math.max(5, process.stderr.rows - PAGE_SIZE_TTY_PADDING));
   }
 
-  return DEFAULT_PAGE_SIZE;
+  return Math.min(DEFAULT_PAGE_SIZE, MAX_DELETE_PAGE_SIZE);
 }
 
 function hasVerboseOutput(format?: DeleteFormat) {
@@ -651,6 +653,7 @@ async function deleteStreamCommand(
 async function deleteCommand(options: Options = {}) {
   const tableName = options.table || process.env.DDBAT_TABLE;
   const pageSize = resolvePageSize(options.pageSize, options.force);
+  const maxPageSize = MAX_DELETE_PAGE_SIZE;
   const interruptTracker = createInterruptTracker();
 
   if (!tableName) {
@@ -673,8 +676,12 @@ async function deleteCommand(options: Options = {}) {
     throw new Error("--no-count is only valid in query mode, not with --input.");
   }
 
-  // Get table key schema
+  // Table key schema is always needed for delete keys.
   const keySchema = await getTableKeySchema(tableName);
+  // Query key schema depends on query target (table or index).
+  const queryKeySchema = options.index
+    ? await getQueryKeySchema(tableName, options.index)
+    : keySchema;
 
   if (streamMode) {
     await deleteStreamCommand(options, tableName, pageSize, keySchema, interruptTracker);
@@ -682,7 +689,7 @@ async function deleteCommand(options: Options = {}) {
   }
 
   // Parse query options using shared function
-  const queryOptions = parseFilterOptions(options, keySchema);
+  const queryOptions = parseFilterOptions(options, queryKeySchema);
 
   // Log query type
   console.error("=".repeat(60));
@@ -893,18 +900,24 @@ async function deleteCommand(options: Options = {}) {
           }
 
           if (action === "delete-all") {
-            if (!nextPage) {
+            if (!currentPage.lastEvaluatedKey) {
               currentPage = { items: [] };
               break;
             }
 
-            currentPageStartKey = nextPage.startKey;
-            currentPage = nextPage.page;
+            const firstBulkPage = await loadPageSkippingEmpty(
+              tableName,
+              queryOptions,
+              maxPageSize,
+              currentPage.lastEvaluatedKey
+            );
+            currentPageStartKey = firstBulkPage.startKey;
+            currentPage = firstBulkPage.page;
             while (currentPage.items.length > 0) {
               const followingPage = await loadNextPage(
                 tableName,
                 queryOptions,
-                pageSize,
+                maxPageSize,
                 currentPage
               );
 

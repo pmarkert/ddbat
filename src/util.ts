@@ -44,6 +44,11 @@ export interface QueryPage {
   lastEvaluatedKey?: DdbatItem;
 }
 
+interface DescribeTableKeySchema {
+  AttributeName?: string;
+  KeyType?: "HASH" | "RANGE" | string;
+}
+
 interface QueryRequestOptions {
   exclusiveStartKey?: DdbatItem;
   limit?: number;
@@ -275,23 +280,17 @@ export async function countTable(
   return totalCount;
 }
 
-/**
- * Get the key schema for a table using DescribeTable
- */
-export async function getTableKeySchema(tableName: string): Promise<KeySchema> {
-  const describeCommand = new DescribeTableCommand({
-    TableName: tableName,
-  });
-
-  const response = await dynamoClient.send(describeCommand);
-
-  if (!response.Table?.KeySchema) {
-    throw new Error(`Could not retrieve key schema for table ${tableName}`);
+function parseKeySchema(
+  source: DescribeTableKeySchema[] | undefined,
+  sourceDescription: string
+): KeySchema {
+  if (!source || source.length === 0) {
+    throw new Error(`Could not retrieve key schema for ${sourceDescription}`);
   }
 
   const keySchema: KeySchema = { partitionKey: "" };
 
-  for (const key of response.Table.KeySchema) {
+  for (const key of source) {
     if (key.KeyType === "HASH") {
       keySchema.partitionKey = key.AttributeName!;
     } else if (key.KeyType === "RANGE") {
@@ -300,10 +299,46 @@ export async function getTableKeySchema(tableName: string): Promise<KeySchema> {
   }
 
   if (!keySchema.partitionKey) {
-    throw new Error(`Could not find partition key for table ${tableName}`);
+    throw new Error(`Could not find partition key for ${sourceDescription}`);
   }
 
   return keySchema;
+}
+
+export async function getQueryKeySchema(tableName: string, indexName?: string): Promise<KeySchema> {
+  const describeCommand = new DescribeTableCommand({
+    TableName: tableName,
+  });
+
+  const response = await dynamoClient.send(describeCommand);
+  const table = response.Table;
+
+  if (!table) {
+    throw new Error(`Could not retrieve table description for table ${tableName}`);
+  }
+
+  if (!indexName) {
+    return parseKeySchema(table.KeySchema, `table ${tableName}`);
+  }
+
+  const gsi = table.GlobalSecondaryIndexes?.find((index) => index.IndexName === indexName);
+  if (gsi) {
+    return parseKeySchema(gsi.KeySchema, `index ${indexName} on table ${tableName}`);
+  }
+
+  const lsi = table.LocalSecondaryIndexes?.find((index) => index.IndexName === indexName);
+  if (lsi) {
+    return parseKeySchema(lsi.KeySchema, `index ${indexName} on table ${tableName}`);
+  }
+
+  throw new Error(`Index ${indexName} was not found on table ${tableName}`);
+}
+
+/**
+ * Get the key schema for a table using DescribeTable
+ */
+export async function getTableKeySchema(tableName: string): Promise<KeySchema> {
+  return getQueryKeySchema(tableName);
 }
 
 /**
