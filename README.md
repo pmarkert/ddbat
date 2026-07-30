@@ -15,53 +15,16 @@ Pronounced: either "diddy-bat" or "dee-dee-bat".
 
 ### Install from npm
 
+```bash
 npm install -g ddbat
 ddbat --help
+```
 
 Or run without installing globally:
 
+```bash
 npx ddbat --help
-
-### Install from source
-
-    git clone <repository-url>
-    cd ddbat
-    npm install
-    npm run build
-    npm link  # makes 'ddbat' available globally
-
-## Release
-
-Run a one-command local release that verifies the repo, bumps version, publishes to npm, and pushes git commit/tags.
-
-Patch release:
-
-    npm run release:patch
-
-Minor release:
-
-    npm run release:minor
-
-Major release:
-
-    npm run release:major
-
-Custom bump type:
-
-    npm run release -- patch
-
-If publishing a scoped package that must be public:
-
-    npm run release -- patch --access-public
-
-The script performs these steps:
-
-- Fails if your working tree is not clean
-- Fails if npm CLI is not logged in
-- Runs lint, build, and npm pack --dry-run
-- Runs npm version (patch/minor/major)
-- Runs npm publish
-- Pushes git commit and tags
+```
 
 ## Usage
 
@@ -72,7 +35,7 @@ All inputs come from flags or environment variables. Status messages go to stder
 
 ### Export
 
-Export all or a filtered subset of a table to JSON lines by default, or use `--format json` for a JSON array. If the command is interrupted, DDBat finishes the current DynamoDB page, closes the output cleanly, and prints a `--start-key` cursor you can use to resume.
+Export all or a filtered subset of a table to JSON lines (one JSON document per line), or use `--format json` to write a JSON array instead. If the command is interrupted, DDBat finishes the current DynamoDB page, closes the output cleanly, and prints a `--start-key` cursor you can use to resume.
 
     # Export to stdout
     ddbat export --table users
@@ -106,13 +69,6 @@ Import JSON lines or a JSON array into a DynamoDB table. Use `--dry-run` to pars
     ddbat import --table users --input users.json --dry-run
 
 Examples:
-
-JSON array:
-
-    [
-      { "userId": "123", "name": "Alice" },
-      { "userId": "456", "name": "Bob" }
-    ]
 
 JSON lines:
 
@@ -201,35 +157,23 @@ export default function (item, index) {
 }
 ```
 
-#### Transform File Template (TypeScript)
+#### Filter/Transform File Template (TypeScript)
 
-```ts
-import type { TransformFn } from "ddbat/transform";
+Transformation and filters are accomplished by calling a custom javascript function.
 
-type Input = {
-  id: string;
-  email?: string;
-  active?: boolean;
-  ssn?: string;
+For filter operations, your function function should return a truthy value to keep the item, otherwise a falsy value will be filtered out. For
+
+For transform operations, if your function returns null/undefined (void) or an empty array, it will be skipped, otherwise, the returned item (or each element if the result is an array) will be passed through.
+
+The same script can often be used for both filter and transform operations. Return void for items you don't want to modify, or return the updated item when you want to transform it.
+
+```javascript
+export default (item) => {
+  // Inspect item and return:
+  // void - to ignore the item
+  // a single transformed item
+  // an array of multiple items
 };
-
-type Output = {
-  id: string;
-  email?: string;
-  migratedAt: string;
-};
-
-const transform: TransformFn<Input, Output> = (item) => {
-  if (!item.active) return null;
-  const { ssn, ...safe } = item;
-  return {
-    id: safe.id,
-    email: safe.email,
-    migratedAt: new Date().toISOString(),
-  };
-};
-
-export default transform;
 ```
 
 #### Common Transform Patterns
@@ -268,7 +212,7 @@ Limitations:
 
 ### Filter
 
-Apply a JavaScript or TypeScript predicate to every item in a JSON stream. The command shares the same input and output options as `transform`, but the function must return a boolean. Items are only emitted when the predicate returns `true`. Inline `--script` accepts either a bare expression or a full function body.
+Apply a JavaScript or TypeScript predicate to every item in a JSON stream. The command shares the same input and output options as `transform`, but the function value will be evaluated as a boolean. Items are only emitted when the predicate returns a truthy value. Inline `--script` accepts either a bare expression or a full function body. For bare expressions, the implicit parameter name is `item`
 
 #### Quick Usage
 
