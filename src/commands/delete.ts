@@ -660,15 +660,29 @@ async function deleteCommand(options: Options = {}) {
     throw new Error("Table name is required. Provide --table or set DDBAT_TABLE");
   }
 
-  const streamMode = options.input !== undefined || !process.stdin.isTTY;
   const hasQueryFilters = options.pk || options.sk || options.index || options.filter;
 
-  if (!process.stdin.isTTY && options.input === undefined && hasQueryFilters) {
+  // `--input` and the query filters are two different ways of choosing what to
+  // delete. Asking for both is genuinely ambiguous, so refuse rather than
+  // silently honour one and drop the other.
+  if (options.input !== undefined && hasQueryFilters) {
     throw new Error(
-      "Piped input detected with query filter options (--pk, --sk, --index, --filter). " +
-        "Use --input explicitly to read from stdin, or remove piped input to use query mode."
+      "--input cannot be combined with query filter options (--pk, --sk, --index, --filter). " +
+        "Supply the keys with --input, or select them with filters, not both."
     );
   }
+
+  // Query filters are themselves the explicit request for query mode, so stdin
+  // is only read as a key stream when none were given.
+  //
+  // This deliberately does not test `process.stdin.isTTY` on its own. That flag
+  // is false for *any* non-terminal stdin — a closed descriptor, `< /dev/null`,
+  // a child process spawned from Node, a CI runner — none of which necessarily
+  // carry data, so it cannot stand in for "keys were piped in". Using it that
+  // way made `ddbat delete --pk foo --force` fail everywhere except an
+  // interactive shell, reporting "Piped input detected" when nothing had been
+  // piped at all.
+  const streamMode = options.input !== undefined || (!process.stdin.isTTY && !hasQueryFilters);
   if (streamMode && options.startKey) {
     throw new Error("--input cannot be combined with --start-key.");
   }
