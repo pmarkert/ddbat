@@ -4,14 +4,15 @@ import { createReadStream } from "fs";
 import { Readable } from "stream";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
-import { streamItems } from "../json-stream.js";
+import { resolvePathOption, streamItems } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { DdbatItem } from "../transform-types.js";
 import { dynamoClient } from "../util.js";
 
 interface Options {
   table?: string;
-  input?: string;
+  // `--input [file]` has an optional value, so commander may hand back `true`.
+  input?: string | boolean;
   dryRun?: boolean;
   progress?: boolean;
 }
@@ -38,7 +39,7 @@ async function importCommand(options: Options = {}) {
     throw new Error("Destination table name is required. Provide --table or set DDBAT_TABLE");
   }
 
-  const inputSource = options.input ?? (process.stdin.isTTY ? undefined : "-");
+  const inputSource = resolvePathOption(options.input) ?? (process.stdin.isTTY ? undefined : "-");
   if (!inputSource) {
     throw new Error("No input provided. Pipe data to stdin or use --input <file>.");
   }

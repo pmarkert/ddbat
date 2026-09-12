@@ -97,6 +97,21 @@ Count matching items, show a forward-only preview page, and prompt for a per-pag
     # Save deleted items to a backup file before removing them
     ddbat delete --table orders --filter "orderDate<'2023-01-01'" --force --format full > backup.json
 
+Delete works in one of two modes:
+
+- **Query mode** — used whenever a query filter (`--pk`, `--sk`, `--index`, `--filter`) is given, and when `delete` is run from a terminal with no filters at all (a full table scan). Items to delete come from the query.
+- **Stream mode** — used with `--input [file]`, and when no query filter is given and stdin is not a terminal. Items to delete are read as JSON lines or a JSON array from the file (or stdin); only their key attributes are used.
+
+`--input` cannot be combined with query filters, and `--start-key`/`--no-count` apply to query mode only.
+
+Deleting by query works the same in scripts, CI, and agent sessions as it does at a terminal, but there is nobody to answer the confirmation prompt there, so pass `--force` (or `--dry-run`):
+
+    # Clear a partition from a script or CI job
+    ddbat delete --table users --pk "inactive" --force --no-count
+
+    # Delete the keys produced by an earlier export
+    ddbat export --table users --pk "inactive" | ddbat delete --table users --force
+
 Interactive delete actions:
 
 - `all`: delete all remaining items from the current page through the end

@@ -2,7 +2,7 @@ import { Command } from "commander";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
 import { addFilterOptions, FilterCommandOptions, parseFilterOptions } from "../filter-options.js";
-import { JsonFormat, openOutput } from "../json-stream.js";
+import { JsonFormat, openOutput, resolvePathOption } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { createInterruptTracker, parseStartKey, printResumeHint } from "../resume.js";
 import { DdbatItem } from "../transform-types.js";
@@ -10,7 +10,8 @@ import { getQueryKeySchema, queryTablePage } from "../util.js";
 
 interface Options extends FilterCommandOptions {
   table?: string;
-  output?: string;
+  // `--output [file]` has an optional value, so commander may hand back `true`.
+  output?: string | boolean;
   format?: JsonFormat;
   progress?: boolean;
   startKey?: DdbatItem;
@@ -53,7 +54,7 @@ export function setup(program: Command) {
 
 async function exportCommand(options: Options = {}) {
   const fromTable = options.table || process.env.DDBAT_TABLE;
-  const outputFile = options.output ?? "-";
+  const outputFile = resolvePathOption(options.output) ?? "-";
   const format: JsonFormat = options.format === "json" ? "json" : "jsonl";
 
   if (!fromTable) {
