@@ -77,7 +77,7 @@ JSON lines:
 
 ### Delete
 
-Count matching items, show a forward-only preview page, and prompt for a per-page action before deleting. Use `--dry-run` to preview only, `--no-count` to skip the initial count pass, `--page-size` to control how many matching items appear on each page, `--start-key` to resume from a previously printed cursor, or `--force` to skip prompts and begin deleting immediately.
+Count matching items, show a forward-only preview page, and prompt for a per-page action before deleting. Use `--dry-run` to preview only, `--no-count` to skip the initial count pass, `--page-size` to control how many matching items appear on each page, `--start-key` to resume from a previously printed cursor, `--force` to skip prompts and begin deleting immediately, or `--all` to target every item in the table.
 
     # Preview without deleting
     ddbat delete --table users --pk "inactive" --dry-run
@@ -97,12 +97,15 @@ Count matching items, show a forward-only preview page, and prompt for a per-pag
     # Save deleted items to a backup file before removing them
     ddbat delete --table orders --filter "orderDate<'2023-01-01'" --force --format full > backup.json
 
-Delete works in one of two modes:
+    # Delete every item in the table (--all is required for this)
+    ddbat delete --table users --all
 
-- **Query mode** — used whenever a query filter (`--pk`, `--sk`, `--index`, `--filter`) is given, and when `delete` is run from a terminal with no filters at all (a full table scan). Items to delete come from the query.
+Delete always needs to be told what to delete — one of query filters, `--input`, or `--all` — and works in one of two modes:
+
+- **Query mode** — used when a query filter (`--pk`, `--sk`, `--index`, `--filter`) or `--all` is given. Items to delete come from the query; `--all` is an unfiltered scan of the whole table.
 - **Stream mode** — used with `--input [file]`, and when no query filter is given and stdin is not a terminal. Items to delete are read as JSON lines or a JSON array from the file (or stdin); only their key attributes are used.
 
-`--input` cannot be combined with query filters, and `--start-key`/`--no-count` apply to query mode only.
+`--all`, `--input`, and query filters are mutually exclusive, and `--start-key`/`--no-count` apply to query mode only. Running `delete` at a terminal with none of them is an error rather than a whole-table delete, in scripts and interactive use alike: emptying a table takes `--all`.
 
 Deleting by query works the same in scripts, CI, and agent sessions as it does at a terminal, but there is nobody to answer the confirmation prompt there, so pass `--force` (or `--dry-run`):
 
@@ -111,6 +114,9 @@ Deleting by query works the same in scripts, CI, and agent sessions as it does a
 
     # Delete the keys produced by an earlier export
     ddbat export --table users --pk "inactive" | ddbat delete --table users --force
+
+    # Empty a table unattended
+    ddbat delete --table users --all --force
 
 Interactive delete actions:
 

@@ -63,6 +63,7 @@ interface Options extends FilterCommandOptions {
   pageSize?: number;
   progress?: boolean;
   startKey?: DdbatItem;
+  all?: boolean;
   // `--input [file]` has an optional value, so commander may hand back `true`.
   input?: string | boolean;
 }
@@ -379,12 +380,16 @@ export function setup(program: Command) {
   const command = program
     .command("delete")
     .description(
-      "Delete matching items from a DynamoDB table. Use query filters (--pk, --sk, etc.) or supply keys via --input."
+      "Delete matching items from a DynamoDB table. Use query filters (--pk, --sk, etc.), supply keys via --input, or pass --all to empty the table."
     )
     .option("-t, --table <tableName>", "Table name [required] (default: $DDBAT_TABLE)")
     .option(
       "-i, --input [file]",
       "Read records from a file (or stdin if omitted) and delete by their keys"
+    )
+    .option(
+      "--all",
+      "Delete every item in the table (required to delete a whole table; cannot be combined with query filters or --input)"
     )
     .option(
       "--dry-run",
@@ -672,6 +677,7 @@ async function deleteCommand(options: Options = {}) {
 
   const inputSource = resolvePathOption(options.input);
   const hasQueryFilters = !!(options.pk || options.sk || options.index || options.filter);
+  const deleteAll = !!options.all;
 
   if (inputSource !== undefined && hasQueryFilters) {
     throw new Error(
@@ -679,10 +685,34 @@ async function deleteCommand(options: Options = {}) {
         "Use --input to delete the keys read from a stream, or query filters to delete by query."
     );
   }
+  if (deleteAll && hasQueryFilters) {
+    throw new Error(
+      "--all cannot be combined with query filter options (--pk, --sk, --index, --filter). " +
+        "--all deletes every item in the table; drop it to delete only the items a query matches."
+    );
+  }
+  if (deleteAll && inputSource !== undefined) {
+    throw new Error(
+      "--all cannot be combined with --input. " +
+        "--all deletes every item in the table; drop it to delete only the keys read from the stream."
+    );
+  }
 
-  // Query filters select query mode explicitly. Otherwise fall back to stream
-  // mode whenever stdin is not a terminal, which is how keys are piped in.
-  const streamMode = inputSource !== undefined || (!hasQueryFilters && !process.stdin.isTTY);
+  // Query filters and --all select query mode explicitly. Otherwise fall back
+  // to stream mode whenever stdin is not a terminal, which is how keys are
+  // piped in.
+  const streamMode =
+    inputSource !== undefined || (!hasQueryFilters && !deleteAll && !process.stdin.isTTY);
+
+  // Deleting a whole table has to be asked for, in every context: there is no
+  // filter to narrow it and no stream of keys to bound it.
+  if (!streamMode && !hasQueryFilters && !deleteAll) {
+    throw new Error(
+      "Nothing was selected for deletion. Use query filters (--pk, --sk, --index, --filter) to " +
+        "delete matching items, --input to delete keys read from a file or stdin, or --all to " +
+        "delete every item in the table."
+    );
+  }
   if (streamMode && options.startKey) {
     throw new Error(
       "--start-key is only valid in query mode, not when reading keys from a stream."
@@ -728,6 +758,8 @@ async function deleteCommand(options: Options = {}) {
         `Sort key filter: ${queryOptions.sortKey.name} ${queryOptions.sortKey.operator} ${queryOptions.sortKey.value}`
       );
     }
+  } else if (deleteAll) {
+    console.error(`Query type: Every item in ${tableName} (--all)`);
   } else {
     console.error("Query type: Full table scan");
   }
