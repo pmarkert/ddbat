@@ -250,6 +250,18 @@ export interface OutputSession {
 }
 
 /**
+ * Resolve a path-valued CLI option declared with an optional argument
+ * (`-i, --input [file]`). Commander hands back `true` when the flag is present
+ * without a value, which every caller then passes to the filesystem; treat it
+ * as "-", the way stdin/stdout is spelled elsewhere.
+ */
+export function resolvePathOption(value: string | boolean | undefined): string | undefined {
+  if (value === undefined || value === false) return undefined;
+  if (value === true) return "-";
+  return value;
+}
+
+/**
  * Open an output session for the given format and destination.
  *
  * When `outputFile` is `"-"` or empty, output goes to stdout.

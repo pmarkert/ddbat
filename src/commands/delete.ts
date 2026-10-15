@@ -7,7 +7,7 @@ import { ReadStream as TtyReadStream } from "tty";
 
 import { wrapCommandHandler } from "../command-wrapper.js";
 import { addFilterOptions, FilterCommandOptions, parseFilterOptions } from "../filter-options.js";
-import { openOutput, OutputSession, streamItems } from "../json-stream.js";
+import { openOutput, OutputSession, resolvePathOption, streamItems } from "../json-stream.js";
 import { createProgressRenderer } from "../progress.js";
 import { createInterruptTracker, parseStartKey, printResumeHint } from "../resume.js";
 import { DdbatItem } from "../transform-types.js";
@@ -33,7 +33,16 @@ function createPromptInterface(): PromptSession {
   }
 
   const ttyPath = process.platform === "win32" ? "CONIN$" : "/dev/tty";
-  const fd = openSync(ttyPath, "r");
+  let fd: number;
+  try {
+    fd = openSync(ttyPath, "r");
+  } catch {
+    // No controlling terminal (CI, a spawned process, an agent session): there
+    // is nobody to answer the prompt.
+    throw new Error(
+      "Cannot prompt for confirmation: no terminal is available. Pass --force to delete without confirmation."
+    );
+  }
   const ttyInput = new TtyReadStream(fd);
   const rl = readline.createInterface({ input: ttyInput, output: process.stderr });
   return {
@@ -54,7 +63,9 @@ interface Options extends FilterCommandOptions {
   pageSize?: number;
   progress?: boolean;
   startKey?: DdbatItem;
-  input?: string;
+  all?: boolean;
+  // `--input [file]` has an optional value, so commander may hand back `true`.
+  input?: string | boolean;
 }
 
 interface StreamPage {
@@ -369,12 +380,16 @@ export function setup(program: Command) {
   const command = program
     .command("delete")
     .description(
-      "Delete matching items from a DynamoDB table. Use query filters (--pk, --sk, etc.) or supply keys via --input."
+      "Delete matching items from a DynamoDB table. Use query filters (--pk, --sk, etc.), supply keys via --input, or pass --all to empty the table."
     )
     .option("-t, --table <tableName>", "Table name [required] (default: $DDBAT_TABLE)")
     .option(
       "-i, --input [file]",
       "Read records from a file (or stdin if omitted) and delete by their keys"
+    )
+    .option(
+      "--all",
+      "Delete every item in the table (required to delete a whole table; cannot be combined with query filters or --input)"
     )
     .option(
       "--dry-run",
@@ -413,9 +428,9 @@ async function deleteStreamCommand(
   tableName: string,
   pageSize: number,
   keySchema: TableKeySchema,
-  interruptTracker: ReturnType<typeof createInterruptTracker>
+  interruptTracker: ReturnType<typeof createInterruptTracker>,
+  inputSource: string
 ) {
-  const inputSource = options.input || "-";
   const inputStream: Readable =
     inputSource === "-" ? (process.stdin as Readable) : createReadStream(inputSource);
   const inputLabel = inputSource !== "-" ? inputSource : "stdin";
@@ -660,20 +675,51 @@ async function deleteCommand(options: Options = {}) {
     throw new Error("Table name is required. Provide --table or set DDBAT_TABLE");
   }
 
-  const streamMode = options.input !== undefined || !process.stdin.isTTY;
-  const hasQueryFilters = options.pk || options.sk || options.index || options.filter;
+  const inputSource = resolvePathOption(options.input);
+  const hasQueryFilters = !!(options.pk || options.sk || options.index || options.filter);
+  const deleteAll = !!options.all;
 
-  if (!process.stdin.isTTY && options.input === undefined && hasQueryFilters) {
+  if (inputSource !== undefined && hasQueryFilters) {
     throw new Error(
-      "Piped input detected with query filter options (--pk, --sk, --index, --filter). " +
-        "Use --input explicitly to read from stdin, or remove piped input to use query mode."
+      "--input cannot be combined with query filter options (--pk, --sk, --index, --filter). " +
+        "Use --input to delete the keys read from a stream, or query filters to delete by query."
+    );
+  }
+  if (deleteAll && hasQueryFilters) {
+    throw new Error(
+      "--all cannot be combined with query filter options (--pk, --sk, --index, --filter). " +
+        "--all deletes every item in the table; drop it to delete only the items a query matches."
+    );
+  }
+  if (deleteAll && inputSource !== undefined) {
+    throw new Error(
+      "--all cannot be combined with --input. " +
+        "--all deletes every item in the table; drop it to delete only the keys read from the stream."
+    );
+  }
+
+  // Query filters and --all select query mode explicitly. Otherwise fall back
+  // to stream mode whenever stdin is not a terminal, which is how keys are
+  // piped in.
+  const streamMode =
+    inputSource !== undefined || (!hasQueryFilters && !deleteAll && !process.stdin.isTTY);
+
+  // Deleting a whole table has to be asked for, in every context: there is no
+  // filter to narrow it and no stream of keys to bound it.
+  if (!streamMode && !hasQueryFilters && !deleteAll) {
+    throw new Error(
+      "Nothing was selected for deletion. Use query filters (--pk, --sk, --index, --filter) to " +
+        "delete matching items, --input to delete keys read from a file or stdin, or --all to " +
+        "delete every item in the table."
     );
   }
   if (streamMode && options.startKey) {
-    throw new Error("--input cannot be combined with --start-key.");
+    throw new Error(
+      "--start-key is only valid in query mode, not when reading keys from a stream."
+    );
   }
   if (streamMode && options.count === false) {
-    throw new Error("--no-count is only valid in query mode, not with --input.");
+    throw new Error("--no-count is only valid in query mode, not when reading keys from a stream.");
   }
 
   // Table key schema is always needed for delete keys.
@@ -684,7 +730,14 @@ async function deleteCommand(options: Options = {}) {
     : keySchema;
 
   if (streamMode) {
-    await deleteStreamCommand(options, tableName, pageSize, keySchema, interruptTracker);
+    await deleteStreamCommand(
+      options,
+      tableName,
+      pageSize,
+      keySchema,
+      interruptTracker,
+      inputSource ?? "-"
+    );
     return;
   }
 
@@ -705,6 +758,8 @@ async function deleteCommand(options: Options = {}) {
         `Sort key filter: ${queryOptions.sortKey.name} ${queryOptions.sortKey.operator} ${queryOptions.sortKey.value}`
       );
     }
+  } else if (deleteAll) {
+    console.error(`Query type: Every item in ${tableName} (--all)`);
   } else {
     console.error("Query type: Full table scan");
   }

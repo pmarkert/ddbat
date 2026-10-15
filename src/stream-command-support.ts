@@ -2,13 +2,15 @@ import { createReadStream } from "fs";
 import { Readable } from "stream";
 
 import { getErrorMessage } from "./error.js";
-import { JsonFormat, openOutput, streamItems } from "./json-stream.js";
+import { JsonFormat, openOutput, resolvePathOption, streamItems } from "./json-stream.js";
 import { createProgressRenderer } from "./progress.js";
 import type { DdbatItem } from "./transform-types.js";
 
 export interface StreamCommandOptions {
-  input?: string;
-  output?: string;
+  // `--input [file]` / `--output [file]` have optional values, so commander may
+  // hand back `true` when the flag is given without one.
+  input?: string | boolean;
+  output?: string | boolean;
   format?: JsonFormat;
   progress?: boolean;
 }
@@ -22,14 +24,16 @@ export async function runItemProcessor(
   processor: ItemProcessor,
   summaryVerb: string
 ): Promise<void> {
-  const outputFile = options.output ?? "-";
+  const outputFile = resolvePathOption(options.output) ?? "-";
+  const inputFile = resolvePathOption(options.input);
   const outputFormat: JsonFormat = options.format === "json" ? "json" : "jsonl";
-  if (!options.input && process.stdin.isTTY) {
+  if (inputFile === undefined && process.stdin.isTTY) {
     throw new Error("No input provided. Pipe data to stdin or use --input <file>.");
   }
-  const inputStream: Readable = options.input
-    ? createReadStream(options.input)
-    : (process.stdin as Readable);
+  const inputStream: Readable =
+    inputFile !== undefined && inputFile !== "-"
+      ? createReadStream(inputFile)
+      : (process.stdin as Readable);
 
   let totalItems = 0;
   let index = 0;
